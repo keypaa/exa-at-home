@@ -1,6 +1,6 @@
 # exa_home/store.py
 from __future__ import annotations
-import json, os
+import hashlib, json, os
 from collections import OrderedDict
 
 class ContentStore:
@@ -13,7 +13,7 @@ class ContentStore:
         self.stats = {"hits": 0, "misses": 0}
 
     def _shard(self, doc_id: str) -> str:
-        return os.path.join(self.root, f"shard-{abs(hash(doc_id)) % 64}.jsonl")
+        return os.path.join(self.root, f"shard-{int(hashlib.sha1(doc_id.encode()).hexdigest()[:8], 16) % 64}.jsonl")
 
     def put(self, doc: dict) -> None:
         with open(self._shard(doc["id"]), "a", encoding="utf-8") as f:
