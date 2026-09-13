@@ -1,7 +1,8 @@
 // crates/ann-core/src/lib.rs
 mod index;
 mod ivf;
-mod quant;
+pub mod lut;
+pub mod quant;
 use numpy::{PyReadonlyArray1, PyReadonlyArray2};
 use pyo3::{exceptions::PyValueError, prelude::*, types::PyModule, Bound};
 
@@ -141,8 +142,10 @@ impl AnnIndex {
 }
 
 /// M3 IVF index over a versioned index/ dir. Routing is exact float dot
-/// over the centroids; per-list scan reuses the M2 `binary_dot_packed`.
-/// `nprobe == K` scans every list, so it must equal M2 brute force exactly.
+/// over the centroids; per-list scan is M4 LUT-scored (`lut::build` once per
+/// query + `lut::score` per doc).
+/// `nprobe == K` scans every list, so it must equal M2 brute force
+/// (within fp reassociation).
 #[pyclass]
 struct IvfIndex {
     inner: index::Loaded,

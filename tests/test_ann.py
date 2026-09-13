@@ -95,7 +95,7 @@ def _write_ivf_index(tmp_path, vecs, k, seed=0):
 
 
 def test_ivf_exact_routing_matches_bruteforce(tmp_path):
-    """nprobe=K must equal M2 brute force exactly."""
+    """nprobe=K must equal M2 brute force within fp-reassociation (M4 LUT)."""
     from ann_core import AnnIndex, IvfIndex
     vecs = make_vectors(300, 256, seed=3)
     ids = _write_ivf_index(tmp_path, vecs, k=8)
@@ -106,7 +106,9 @@ def test_ivf_exact_routing_matches_bruteforce(tmp_path):
     ref = AnnIndex.from_binary(pack, ids)
     want_ids, want_scores = ref.search_binary(q, top_k=10)
     assert got_ids == want_ids
-    assert np.allclose(got_scores, want_scores, atol=1e-6)
+    # M4: IVF scan is LUT-scored, so fp reassociation vs the naive M2 loop
+    # costs ~1e-6; 1e-3 is the LUT==naive bar (cf. Rust lut_matches_naive).
+    assert np.allclose(got_scores, want_scores, atol=1e-3)
     assert got_ids[0] == "d0"
 
 
@@ -147,6 +149,29 @@ def test_train_centroids_cli_help():
     assert r.returncode == 0
     for flag in ("--vecs", "--k", "--sample", "--out"):
         assert flag in r.stdout
+
+
+def test_m4_scores_match_m2(tmp_path):
+    """M4 no-regression: IVF search() (now LUT-scored) agrees with the M2
+    naive `binary_dot_packed` numpy reference beyond fp-reassociation
+    tolerance. Pins API stability (ids + float scores); the strong
+    bit-exactness check is the Rust `lut_matches_naive` unit test."""
+    from ann_core import IvfIndex
+    vecs = make_vectors(300, 256, seed=3)
+    ids = _write_ivf_index(tmp_path, vecs, k=8)
+    idx = IvfIndex.load(str(tmp_path))
+    q = vecs[0]
+    got_ids, got_scores = idx.search(q, nprobe=8, top_k=10)
+    pack = np.packbits((vecs > 0).astype(np.uint8), axis=1, bitorder="little")
+    want = np.array([
+        float(np.sum(np.where(
+            np.unpackbits(row, bitorder="little")[:256].astype(bool), q, -q)))
+        for row in pack
+    ])
+    order = np.argsort(-want, kind="stable")[:10]
+    assert got_ids == [ids[i] for i in order]
+    assert np.allclose(got_scores, want[order], atol=1e-3)
+    assert all(isinstance(s, float) for s in got_scores)
 
 
 @pytest.mark.cloud_only

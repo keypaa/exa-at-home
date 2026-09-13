@@ -18,3 +18,7 @@ serde_json = "1"
 
 [dev-dependencies]
 criterion = "0.5"
+
+[[bench]]
+name = "search_bench"
+harness = false

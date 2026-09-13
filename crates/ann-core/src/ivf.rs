@@ -2,7 +2,7 @@
 // M3: centroid routing + inverted-list scan. Bit order is the Task 5
 // contract (byte i/8, bit i%8, LSB-first) via quant::binary_dot_packed.
 
-use crate::quant;
+use crate::{lut, quant};
 
 /// Route a query to the `nprobe` nearest centroids (exact float dot over K
 /// centroids, partial select). `centroids` is K×`dim` row-major. Returns
@@ -24,11 +24,19 @@ pub fn route(centroids: &[f32], k: usize, dim: usize, q: &[f32], nprobe: usize) 
     scored.into_iter().map(|(c, _)| c).collect()
 }
 
-/// Linear scan of the selected posting lists with `binary_dot_packed`.
+/// Linear scan of the selected posting lists, M4 LUT-scored.
 /// `codes` is n×32 row-major packed rows; `lists` holds per-cluster row
 /// ids. `allow`, when present, must be sorted ascending and is enforced by
 /// binary search (the binding sorts once per query). Returns (row id,
 /// score) pairs sorted best-first, truncated to `top_k`.
+///
+/// M4: one 64×16 LUT is built per query (`lut::build`) and each doc is
+/// scored with 64 nibble-gather lookups (`lut::score`) instead of the naive
+/// 256-iteration `quant::binary_dot_packed` loop. Scores agree within fp
+/// reassociation (see `lut::tests`). Non-256-dim queries (unit-test scale
+/// only — production dim is always 256) fall back to the naive loop so this
+/// fn stays total over any `q.len()`; both scoring fns are kept so the
+/// criterion bench can compare M2 vs M4.
 pub fn search_lists(
     lists: &[Vec<u32>],
     codes: &[[u8; 32]],
@@ -37,6 +45,10 @@ pub fn search_lists(
     top_k: usize,
     allow: Option<&[u32]>,
 ) -> Vec<(u32, f32)> {
+    let table: Option<[[f32; 16]; 64]> = match q.try_into() {
+        Ok(qa) => Some(lut::build(qa)),
+        Err(_) => None,
+    };
     let mut scored: Vec<(u32, f32)> = Vec::new();
     for &c in cluster_ids {
         for &row in &lists[c as usize] {
@@ -45,7 +57,11 @@ pub fn search_lists(
                     continue;
                 }
             }
-            scored.push((row, quant::binary_dot_packed(&codes[row as usize], q)));
+            let s = match &table {
+                Some(t) => lut::score(&codes[row as usize], t),
+                None => quant::binary_dot_packed(&codes[row as usize], q),
+            };
+            scored.push((row, s));
         }
     }
     scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
