@@ -1,4 +1,10 @@
 # tests/test_ann.py
+import json
+import struct
+import subprocess
+import sys
+from pathlib import Path
+
 import numpy as np
 import pytest
 from fixtures.synth import make_vectors
@@ -52,3 +58,105 @@ def test_m2_from_binary_rejects_bad_shape():
     with pytest.raises(Exception):
         AnnIndex.from_binary(np.zeros((10, 31), dtype=np.uint8),
                              [f"d{i}" for i in range(10)])
+
+
+# --- Task 6 (M3): IVF routing over a versioned index/ dir ---
+
+def _write_ivf_index(tmp_path, vecs, k, seed=0):
+    """Minimal valid index/ dir per the locked layout.
+
+    Nearest-centroid assignment stands in for K-means (no sklearn in
+    Tier 0); the loader and routing logic under test don't care how the
+    centroids were produced.
+    """
+    from exa_home.index_format import (
+        CENTROIDS_FILE, CODES_FILE, DOC_IDS_FILE, LISTS_FILE,
+        write_manifest,
+    )
+    n, dim = vecs.shape
+    rng = np.random.default_rng(seed)
+    centroids = vecs[rng.choice(n, size=k, replace=False)]
+    assign = np.argmax(vecs @ centroids.T, axis=1)
+    d = Path(tmp_path)
+    centroids.astype("<f4").tofile(d / CENTROIDS_FILE)
+    pack = np.packbits((vecs > 0).astype(np.uint8), axis=1, bitorder="little")
+    assert pack.shape == (n, 32)
+    pack.tofile(d / CODES_FILE)
+    with open(d / LISTS_FILE, "wb") as f:
+        f.write(struct.pack("<I", k))
+        for c in range(k):
+            rows = np.where(assign == c)[0].astype("<u4")
+            f.write(struct.pack("<I", len(rows)))
+            f.write(rows.tobytes())
+    ids = [f"d{i}" for i in range(n)]
+    (d / DOC_IDS_FILE).write_text(json.dumps(ids))
+    write_manifest(str(d), {"dim": dim, "n_docs": n, "n_centroids": k})
+    return ids
+
+
+def test_ivf_exact_routing_matches_bruteforce(tmp_path):
+    """nprobe=K must equal M2 brute force exactly."""
+    from ann_core import AnnIndex, IvfIndex
+    vecs = make_vectors(300, 256, seed=3)
+    ids = _write_ivf_index(tmp_path, vecs, k=8)
+    idx = IvfIndex.load(str(tmp_path))
+    q = vecs[0]
+    got_ids, got_scores = idx.search(q, nprobe=8, top_k=10)
+    pack = np.packbits((vecs > 0).astype(np.uint8), axis=1, bitorder="little")
+    ref = AnnIndex.from_binary(pack, ids)
+    want_ids, want_scores = ref.search_binary(q, top_k=10)
+    assert got_ids == want_ids
+    assert np.allclose(got_scores, want_scores, atol=1e-6)
+    assert got_ids[0] == "d0"
+
+
+def test_ivf_search_allow_list_filters(tmp_path):
+    from ann_core import IvfIndex
+    vecs = make_vectors(100, 256, seed=5)
+    _write_ivf_index(tmp_path, vecs, k=4)
+    idx = IvfIndex.load(str(tmp_path))
+    allow = [7, 1, 5]  # deliberately unsorted: Rust sorts once per query
+    got_ids, _ = idx.search(vecs[10], nprobe=4, top_k=10, allow=allow)
+    assert sorted(got_ids) == ["d1", "d5", "d7"]
+
+
+def test_ivf_load_rejects_corruption(tmp_path):
+    from ann_core import IvfIndex
+    from exa_home.index_format import CODES_FILE
+    vecs = make_vectors(50, 256, seed=6)
+    _write_ivf_index(tmp_path, vecs, k=4)
+    p = Path(tmp_path) / CODES_FILE
+    raw = bytearray(p.read_bytes())
+    raw[0] ^= 0xFF
+    p.write_bytes(bytes(raw))
+    with pytest.raises(Exception):
+        IvfIndex.load(str(tmp_path))
+
+
+def test_train_centroids_importable():
+    import inspect
+    from scripts.train_centroids import main as train
+    assert list(inspect.signature(train).parameters) == \
+        ["vecs_path", "k", "sample", "out", "seed"]
+
+
+def test_train_centroids_cli_help():
+    script = Path(__file__).resolve().parent.parent / "scripts" / "train_centroids.py"
+    r = subprocess.run([sys.executable, str(script), "--help"],
+                       capture_output=True, text=True)
+    assert r.returncode == 0
+    for flag in ("--vecs", "--k", "--sample", "--out"):
+        assert flag in r.stdout
+
+
+@pytest.mark.cloud_only
+def test_train_centroids_mini_run(tmp_path):
+    """Cloud-only: needs sklearn (declared dep, unavailable offline)."""
+    from scripts.train_centroids import main as train
+    vecs = make_vectors(200, 256, seed=9)
+    vpath = tmp_path / "vecs.npy"
+    out = tmp_path / "centroids.npy"
+    np.save(vpath, vecs)
+    train(str(vpath), 4, 200, str(out))
+    c = np.load(out)
+    assert c.shape == (4, 256) and c.dtype == np.float32
