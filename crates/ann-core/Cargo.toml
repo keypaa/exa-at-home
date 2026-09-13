@@ -1,0 +1,20 @@
+[package]
+name = "ann-core"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "ann_core"
+crate-type = ["cdylib", "rlib"]  # rlib so criterion benches can link internals
+
+[dependencies]
+pyo3 = { version = "0.22", features = ["extension-module"] }
+numpy = "0.22"
+ndarray = "0.16"
+roaring = "0.10"
+sha2 = "0.10"          # manifest verify (Task 6)
+serde = { version = "1", features = ["derive"] }  # index JSON (Tasks 6, 8)
+serde_json = "1"
+
+[dev-dependencies]
+criterion = "0.5"

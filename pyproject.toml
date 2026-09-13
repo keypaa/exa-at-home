@@ -1,0 +1,30 @@
+[project]
+name = "exa-home"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+  "numpy>=1.26",
+  "warcio>=1.7",
+  "sentence-transformers>=2.2",
+  "torch",
+  "fastmcp",
+  "duckdb",
+  "scikit-learn",
+  "pyroaring>=0.4",
+  "pytest",
+]
+
+[project.optional-dependencies]
+dev = ["maturin>=1.0"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# Note: pip does NOT build the Rust module — `ann_core` is built with
+# `maturin develop` in Task 4 (`pip install -e .[dev]` for maturin).
+
+[tool.pytest.ini_options]
+markers = ["cloud_only: needs GPU/model or >1k docs; never runs in local CI"]
+# Repo root for `exa_home.*`, tests dir for `fixtures.*` (Task 2+ tests use both).
+pythonpath = [".", "tests"]
