@@ -28,9 +28,13 @@ impl AnnIndex {
     fn search(&self, py: Python<'_>, q: PyReadonlyArray1<f32>, top_k: usize)
         -> PyResult<(Vec<String>, Vec<f32>)>
     {
+        // Copy the query out BEFORE releasing the GIL: the array wrapper
+        // holds the GIL guard and cannot cross the allow_threads boundary
+        // (E0277). 256 floats — the copy is negligible next to the scan.
+        let q: Vec<f32> = q.as_slice().unwrap().to_vec();
+        assert_eq!(q.len(), self.dim);
         py.allow_threads(|| {
-            let q = q.as_slice().unwrap();
-            assert_eq!(q.len(), self.dim);
+            let q = q.as_slice();
             let mut scored: Vec<(u32, f32)> = (0..self.n as u32)
                 .map(|i| {
                     let row = &self.rows[i as usize * self.dim..(i as usize + 1) * self.dim];

@@ -1,3 +1,10 @@
 zenno/traces/
 zenno/telemetry/
 zenno/graph/
+
+# build outputs (never commit)
+target/
+__pycache__/
+.pytest_cache/
+*.pyc
+Cargo.lock
