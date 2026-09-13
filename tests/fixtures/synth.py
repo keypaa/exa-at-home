@@ -39,15 +39,19 @@ def make_wet_gz(path: str, docs: list[dict]) -> None:
         _make_wet_gz_fallback(path, docs)
         return
 
-    with open(path, "wb") as f, gzip.GzipFile(fileobj=f, mode="wb") as gz:
-        writer = WARCWriter(gz, gzip=False)
+    # Multi-member gzip: one gzip member per record, matching real WET files.
+    # warcio's ArchiveIterator strictly requires this layout and rejects a
+    # single gzip member spanning multiple records.
+    with open(path, "wb") as f:
         for d in docs:
-            payload = d["text"].encode("utf-8")
-            rec = writer.create_warc_record(
-                d["url"], "conversion",
-                payload=io.BytesIO(payload),
-                warc_content_type="text/plain")
-            writer.write_record(rec)
+            with gzip.GzipFile(fileobj=f, mode="wb") as gz:
+                writer = WARCWriter(gz, gzip=False)
+                payload = d["text"].encode("utf-8")
+                rec = writer.create_warc_record(
+                    d["url"], "conversion",
+                    payload=io.BytesIO(payload),
+                    warc_content_type="text/plain")
+                writer.write_record(rec)
 
 
 def _make_wet_gz_fallback(path: str, docs: list[dict]) -> None:
@@ -56,19 +60,20 @@ def _make_wet_gz_fallback(path: str, docs: list[dict]) -> None:
     import uuid
     from email.utils import formatdate
 
-    with open(path, "wb") as f, gzip.GzipFile(fileobj=f, mode="wb", mtime=0) as gz:
+    with open(path, "wb") as f:
         for d in docs:
-            payload = d["text"].encode("utf-8")
-            digest = hashlib.sha1(payload).hexdigest()
-            header = (
-                "WARC/1.0\r\n"
-                "WARC-Type: conversion\r\n"
-                f"WARC-Target-URI: {d['url']}\r\n"
-                f"WARC-Date: {formatdate(usegmt=True)}\r\n"
-                f"WARC-Record-ID: <urn:uuid:{uuid.uuid4()}>\r\n"
-                "Content-Type: text/plain\r\n"
-                f"WARC-Block-Digest: sha1:{digest}\r\n"
-                f"Content-Length: {len(payload)}\r\n"
-                "\r\n"
-            )
-            gz.write(header.encode("utf-8") + payload + b"\r\n\r\n")
+            with gzip.GzipFile(fileobj=f, mode="wb", mtime=0) as gz:
+                payload = d["text"].encode("utf-8")
+                digest = hashlib.sha1(payload).hexdigest()
+                header = (
+                    "WARC/1.0\r\n"
+                    "WARC-Type: conversion\r\n"
+                    f"WARC-Target-URI: {d['url']}\r\n"
+                    f"WARC-Date: {formatdate(usegmt=True)}\r\n"
+                    f"WARC-Record-ID: <urn:uuid:{uuid.uuid4()}>\r\n"
+                    "Content-Type: text/plain\r\n"
+                    f"WARC-Block-Digest: sha1:{digest}\r\n"
+                    f"Content-Length: {len(payload)}\r\n"
+                    "\r\n"
+                )
+                gz.write(header.encode("utf-8") + payload + b"\r\n\r\n")
