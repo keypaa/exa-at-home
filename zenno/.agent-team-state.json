@@ -1,0 +1,6 @@
+{
+  "totalSpawned": 0,
+  "currentActive": 0,
+  "depthByAgentId": {},
+  "pendingDepthStack": []
+}

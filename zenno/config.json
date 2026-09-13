@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "shield": {
+    "confidentialFileGuard": {
+      "denyPatterns": [
+        ".env",
+        ".env.*",
+        "*.pem",
+        "*.key",
+        "id_rsa",
+        "id_ed25519",
+        "credentials.json",
+        "secrets.yml",
+        "secrets.yaml",
+        ".npmrc",
+        ".netrc"
+      ],
+      "allowPatterns": [
+        ".env.example",
+        ".env.sample",
+        ".env.template"
+      ]
+    },
+    "provenanceGuard": {
+      "typosquatList": [],
+      "blockGlobalInstalls": true
+    },
+    "secretScanner": {
+      "allowlist": []
+    }
+  },
+  "agentTeam": {
+    "depthCap": 3,
+    "concurrentCap": 8,
+    "totalPerTaskCap": 10
+  },
+  "telemetry": {
+    "enabled": false,
+    "recordContent": false
+  },
+  "traces": {
+    "defaultMode": "raw"
+  }
+}
