@@ -49,14 +49,32 @@ def sha256(path: str) -> str:
             h.update(chunk)
     return h.hexdigest()
 
-def write_manifest(index_dir: str, meta: dict) -> None:
+def _manifest_entries(index_dir: str, prefix: str = "") -> dict:
+    """sha256 of every file under index_dir, keyed by manifest-relative path.
+
+    Recurses into subdirectories (filter/ in Task 8) so filter bitmaps are
+    covered by the same fail-fast verify path. Keys use forward slashes
+    (index/filter/domains.bin), matching the Rust loader's manifest_files().
+    """
     files = {}
     for name in sorted(os.listdir(index_dir)):
-        if name == MANIFEST:
+        if name == MANIFEST and not prefix:
             continue
-        files[name] = sha256(os.path.join(index_dir, name))
+        full = os.path.join(index_dir, name)
+        rel = f"{prefix}{name}"
+        if os.path.isdir(full):
+            files.update(_manifest_entries(full, prefix=rel + "/"))
+        else:
+            files[rel] = sha256(full)
+    return files
+
+
+def write_manifest(index_dir: str, meta: dict) -> None:
+    has_filter = os.path.isdir(os.path.join(index_dir, "filter"))
+    files = _manifest_entries(index_dir)
     with open(os.path.join(index_dir, MANIFEST), "w") as f:
-        json.dump({"version": SCHEMA_VERSION, **meta, "files": files}, f, indent=2)
+        json.dump({"version": SCHEMA_VERSION, "has_filter": has_filter,
+                   **meta, "files": files}, f, indent=2)
 
 def verify_manifest(index_dir: str) -> dict:
     with open(os.path.join(index_dir, MANIFEST)) as f:

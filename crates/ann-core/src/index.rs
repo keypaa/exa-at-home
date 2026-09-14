@@ -32,6 +32,10 @@ pub struct Loaded {
     pub codes: Vec<[u8; 32]>,
     pub lists: Vec<Vec<u32>>,
     pub ids: Vec<String>,
+    /// Present when index/filter/ exists (Task 8). Manifest-covered either
+    /// way: filter files are checksummed when present, and their absence is
+    /// pinned by the manifest `has_filter` flag (see below).
+    pub filter: Option<super::filter::FilterIdx>,
 }
 
 fn err(msg: String) -> PyErr {
@@ -194,6 +198,50 @@ pub fn load(dir: &Path) -> Result<Loaded, String> {
             ids.len()
         ));
     }
+    let n_docs = ids.len();
+
+    // Task 8: filter/ subdir (optional). When present, all six files must
+    // verify: presence/absence is pinned by the manifest `has_filter` flag so
+    // a dropped filter/ dir fails fast instead of serving unfiltered queries
+    // as if no filter had been requested.
+    let filter_dir = super::filter::subdir(dir);
+    let filter_present = filter_dir.is_dir();
+    let want_filter = m.get("has_filter").and_then(|v| v.as_bool());
+    match (filter_present, want_filter) {
+        (true, Some(false)) => {
+            return Err(format!(
+                "index/filter/ present but {MANIFEST} says has_filter=false \
+                 (stale filter dir or stale manifest)"
+            ));
+        }
+        (false, Some(true)) => {
+            return Err(format!(
+                "index/filter/ missing but {MANIFEST} says has_filter=true \
+                 (filter files were deleted)"
+            ));
+        }
+        _ => {}
+    }
+    let filter = if filter_present {
+        // Hashes were already verified by the manifest loop above (filter
+        // files are entries in the same `files` map); here we only require
+        // that all six are pinned, so a legacy manifest that predates the
+        // filter build fails here instead of loading unverified bitmaps.
+        for name in super::filter::FilterIdx::manifest_files() {
+            if !want.contains_key(name) {
+                return Err(format!(
+                    "index/filter/ present but {MANIFEST} has no checksum \
+                     for {name} (manifest predates the filter build)"
+                ));
+            }
+        }
+        Some(super::filter::load(dir).map_err(|e| format!("filter load: {e}"))?)
+    } else {
+        None
+    };
+    if let Some(f) = &filter {
+        f.check_row_space(n_docs)?;
+    }
 
     Ok(Loaded {
         centroids,
@@ -201,6 +249,7 @@ pub fn load(dir: &Path) -> Result<Loaded, String> {
         codes,
         lists,
         ids,
+        filter,
     })
 }
 

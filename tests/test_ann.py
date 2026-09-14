@@ -185,3 +185,112 @@ def test_train_centroids_mini_run(tmp_path):
     train(str(vpath), 4, 200, str(out))
     c = np.load(out)
     assert c.shape == (4, 256) and c.dtype == np.float32
+
+
+# --- Task 8 (M6-partial): inverted filter index + in-scan intersect ---
+
+FILTER_DOCS = [
+    {"id": "d0", "url": "https://example.com/a", "title": "",
+     "text": "alpha beta gamma of shared words here", "date": "2026-01-15"},
+    {"id": "d1", "url": "https://other.org/b", "title": "",
+     "text": "alpha delta epsilon of shared words here", "date": "2026-02-20"},
+    {"id": "d2", "url": "https://example.com/c", "title": "",
+     "text": "zeta eta theta of shared words here", "date": "2026-01-25"},
+]
+
+
+def _write_ivf_index_with_filter(tmp_path, vecs, k, docs, seed=0):
+    """Full index/ dir incl. filter/: flat IVF files + filter/ subdir, with the
+    manifest rewritten LAST so the filter files are covered by verify."""
+    from exa_home.index_format import write_manifest
+    from scripts.build_filter import build
+    ids = _write_ivf_index(tmp_path, vecs, k, seed=seed)
+    build(docs, str(Path(tmp_path) / "filter"))
+    n, dim = vecs.shape
+    write_manifest(str(tmp_path), {"dim": dim, "n_docs": n, "n_centroids": k})
+    return ids
+
+
+def test_filter_build_writes_locked_layout(tmp_path):
+    from scripts.build_filter import build
+    from pyroaring import BitMap
+    out = tmp_path / "filter"
+    build(FILTER_DOCS, str(out))
+    for name in ("domains.bin", "domains.json", "dates.bin", "dates.json",
+                 "terms.bin", "terms.json"):
+        assert (out / name).is_file(), name
+    # domains.json offsets slice the right bitmaps out of domains.bin.
+    raw = (out / "domains.bin").read_bytes()
+    doms = json.loads((out / "domains.json").read_text())
+    assert set(doms) == {"example.com", "other.org"}
+    off, ln = doms["example.com"]
+    assert set(BitMap.deserialize(raw[off:off + ln])) == {0, 2}
+    off, ln = doms["other.org"]
+    assert set(BitMap.deserialize(raw[off:off + ln])) == {1}
+    # dates bucket per YYYY-MM.
+    dates = json.loads((out / "dates.json").read_text())
+    assert set(dates) == {"2026-01", "2026-02"}
+    # terms: lowercase alnum tokens len>=3; short tokens dropped.
+    terms = json.loads((out / "terms.json").read_text())
+    assert "alpha" in terms and "zeta" in terms
+    assert "of" not in terms
+    assert all(t == t.lower() and len(t) >= 3 for t in terms)
+
+
+def test_filter_build_respects_max_terms(tmp_path):
+    from scripts.build_filter import build
+    build(FILTER_DOCS, str(tmp_path / "f"), max_terms=3)
+    terms = json.loads((tmp_path / "f" / "terms.json").read_text())
+    # "shared"/"words"/"here" have df=3 each, the max; everything else <= 2.
+    assert set(terms) == {"shared", "words", "here"}
+
+
+def test_filter_domains_restricts_results(tmp_path):
+    from ann_core import IvfIndex
+    vecs = make_vectors(3, 256, seed=21)
+    _write_ivf_index_with_filter(tmp_path, vecs, 2, FILTER_DOCS)
+    idx = IvfIndex.load(str(tmp_path))
+    q = vecs[0]
+    all_ids, _ = idx.search(q, nprobe=2, top_k=10)
+    assert set(all_ids) == {"d0", "d1", "d2"}
+    dom_ids, _ = idx.search(q, nprobe=2, top_k=10, domains=["example.com"])
+    assert set(dom_ids) <= set(all_ids)
+    assert set(dom_ids) == {"d0", "d2"}
+    # Unknown domain matches nothing (empty, not an error).
+    assert idx.search(q, nprobe=2, top_k=10, domains=["nope.example"])[0] == []
+
+
+def test_filter_month_range_and_terms(tmp_path):
+    from ann_core import IvfIndex
+    vecs = make_vectors(3, 256, seed=21)
+    _write_ivf_index_with_filter(tmp_path, vecs, 2, FILTER_DOCS)
+    idx = IvfIndex.load(str(tmp_path))
+    q = vecs[0]
+    jan, _ = idx.search(q, nprobe=2, top_k=10, month_range=("2026-01", "2026-01"))
+    assert set(jan) == {"d0", "d2"}
+    feb, _ = idx.search(q, nprobe=2, top_k=10, month_range=("2026-02", "2026-02"))
+    assert set(feb) == {"d1"}
+    wide, _ = idx.search(q, nprobe=2, top_k=10, month_range=("2026-01", "2026-02"))
+    assert set(wide) == {"d0", "d1", "d2"}
+    # Terms conjoin (AND); lookup is case-insensitive like the index keys.
+    one, _ = idx.search(q, nprobe=2, top_k=10, terms=["ALPHA"])
+    assert set(one) == {"d0", "d1"}
+    two, _ = idx.search(q, nprobe=2, top_k=10, terms=["alpha", "beta"])
+    assert set(two) == {"d0"}
+    # Dimensions conjoin: domain AND term.
+    both, _ = idx.search(q, nprobe=2, top_k=10,
+                         domains=["example.com"], terms=["alpha"])
+    assert set(both) == {"d0"}
+    # Explicit allow-list composes with filter bitsets (intersection).
+    combo, _ = idx.search(q, nprobe=2, top_k=10, allow=[0, 1],
+                          domains=["example.com"])
+    assert set(combo) == {"d0"}
+
+
+def test_filter_kwargs_without_filter_dir_raise(tmp_path):
+    from ann_core import IvfIndex
+    vecs = make_vectors(3, 256, seed=21)
+    _write_ivf_index(tmp_path, vecs, 2)  # no filter/ subdir
+    idx = IvfIndex.load(str(tmp_path))
+    with pytest.raises(Exception, match="filter"):
+        idx.search(vecs[0], nprobe=2, top_k=10, domains=["example.com"])

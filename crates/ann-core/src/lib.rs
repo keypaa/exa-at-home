@@ -1,4 +1,5 @@
 // crates/ann-core/src/lib.rs
+mod filter;
 mod index;
 mod ivf;
 pub mod lut;
@@ -160,7 +161,7 @@ impl IvfIndex {
         })
     }
 
-    #[pyo3(signature = (q, nprobe, top_k, allow=None))]
+    #[pyo3(signature = (q, nprobe, top_k, allow=None, domains=None, month_range=None, terms=None))]
     fn search(
         &self,
         py: Python<'_>,
@@ -168,6 +169,9 @@ impl IvfIndex {
         nprobe: usize,
         top_k: usize,
         allow: Option<Vec<u32>>,
+        domains: Option<Vec<String>>,
+        month_range: Option<(String, String)>,
+        terms: Option<Vec<String>>,
     ) -> PyResult<(Vec<String>, Vec<f32>)> {
         let inner = &self.inner;
         // Copy the query out BEFORE releasing the GIL (E0277, same as
@@ -188,10 +192,66 @@ impl IvfIndex {
                 "IvfIndex.search: nprobe must be >= 1",
             ));
         }
-        // Sorted once per query so the ivf scan can binary-search.
-        let mut allow_sorted = allow;
+        // Resolve the filter facets to a row-id bitmap BEFORE releasing the
+        // GIL (error paths raise instead of serving partial results). Rust
+        // resolves filter files internally — bitmaps never cross the FFI.
+        let expr = filter::FilterExpr {
+            domains,
+            month_range,
+            terms,
+        };
+        let filter_rows: Option<Vec<u32>> = match &inner.filter {
+            Some(f) => filter::FilterIdx::rows(&f.resolve(&expr).map_err(|e| {
+                PyValueError::new_err(format!("IvfIndex.search: filter resolve: {e}"))
+            })?)
+            .map(|mut rows| {
+                rows.sort_unstable();
+                rows
+            }),
+            None => {
+                if expr.domains.is_some() || expr.month_range.is_some() || expr.terms.is_some() {
+                    return Err(PyValueError::new_err(
+                        "IvfIndex.search: filter kwargs need index/filter/ \
+                         (build with scripts/build_filter.py)",
+                    ));
+                }
+                None
+            }
+        };
+        // Intersect the explicit allow-list with the filter bitmap (both
+        // sorted ascending, so the ivf scan can binary-search).
+        let mut allow_sorted = match (allow, filter_rows) {
+            (Some(mut a), Some(b)) => {
+                a.sort_unstable();
+                let inter: Vec<u32> = {
+                    let (mut i, mut j) = (0usize, 0usize);
+                    let mut out = Vec::new();
+                    while i < a.len() && j < b.len() {
+                        if a[i] == b[j] {
+                            out.push(a[i]);
+                            i += 1;
+                            j += 1;
+                        } else if a[i] < b[j] {
+                            i += 1;
+                        } else {
+                            j += 1;
+                        }
+                    }
+                    out
+                };
+                Some(inter)
+            }
+            (Some(mut a), None) => {
+                a.sort_unstable();
+                Some(a)
+            }
+            (None, b) => b,
+        };
+        // Deduplicate: only needed after the merge above (each input is a set
+        // on its own — allow may repeat, bitmap rows never do — but a single
+        // dedup covers both paths).
         if let Some(a) = allow_sorted.as_mut() {
-            a.sort_unstable();
+            a.dedup();
         }
         let allow_slice = allow_sorted.as_deref();
         py.allow_threads(|| {
