@@ -21,6 +21,13 @@ impl AnnIndex {
     #[new]
     fn new(mat: PyReadonlyArray2<f32>, ids: Vec<String>) -> PyResult<Self> {
         let a = mat.as_array();
+        if a.nrows() != ids.len() {
+            return Err(PyValueError::new_err(format!(
+                "AnnIndex::new: {} matrix rows but {} ids",
+                a.nrows(),
+                ids.len()
+            )));
+        }
         Ok(Self {
             rows: a.as_slice().unwrap().to_vec(),
             n: a.nrows(),
@@ -76,7 +83,13 @@ impl AnnIndex {
         // holds the GIL guard and cannot cross the allow_threads boundary
         // (E0277). 256 floats — the copy is negligible next to the scan.
         let q: Vec<f32> = q.as_slice().unwrap().to_vec();
-        assert_eq!(q.len(), self.dim);
+        if q.len() != self.dim {
+            return Err(PyValueError::new_err(format!(
+                "AnnIndex.search: query dim {} != index dim {}",
+                q.len(),
+                self.dim
+            )));
+        }
         py.allow_threads(|| {
             let q = q.as_slice();
             let mut scored: Vec<(u32, f32)> = (0..self.n as u32)

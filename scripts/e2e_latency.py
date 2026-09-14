@@ -22,7 +22,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "tests"))
 
-STAGE_ORDER = ("embed", "retrieve", "rerank", "snippet")
+# Spec §7 profile keys from run_search (filter_ms is in-scan, always 0.0 —
+# excluded from the waterfall sum so the integrity check is unchanged).
+STAGE_ORDER = ("embed_ms", "ann_ms", "rerank_ms", "snippet_ms")
 
 
 def pct(xs, p):

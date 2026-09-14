@@ -235,10 +235,16 @@ python scripts/ground_truth.py --vecs vecs.npy --ids ids.json \
     --nq 1000 --out gt.jsonl
 python scripts/measure_recall.py --gt gt.jsonl --pred pred.jsonl
 # Rust absolutes for the M2/M3 EXPERIMENTS.md rows
-cargo bench --bench search_bench   # run from repo root
+cargo bench -p ann-core --bench search_bench   # run from repo root
 ```
 
 Deferred measurements — all funnel through this runbook; none can land sooner:
+
+- (pre) **Arctic doc-side prefix + trust_remote_code verifies**: confirm on
+  box whether `encode_docs` needs a doc-side prefix (queries use
+  `prompt_name="query"`) and whether the Arctic load proves out without
+  `trust_remote_code` (see `exa_home/embed.py`); land the verdict in
+  `EXPERIMENTS.md` before the full builds.
 
 - (a) **Rerank <40ms** (`test_real_model_200_pairs_under_40ms`, cloud_only):
   needs CUDA + the ~90MB `cross-encoder/ms-marco-MiniLM-L6-v2` HF download.
@@ -247,8 +253,8 @@ Deferred measurements — all funnel through this runbook; none can land sooner:
   needs `index/` + `q.jsonl` at root per Task 12's hardcoded paths — §§3–5
   produce exactly those. `pytest tests/test_e2e_tier0.py -m cloud_only -q`.
 - (c) **`cargo bench` absolutes** for the M2/M3 EXPERIMENTS.md rows
-  (`binary_dot_packed_scan_2k`, `lut_scan_2k`): `cargo bench --bench
-  search_bench` on the box; record the before/after row.
+  (`binary_dot_packed_scan_2k`, `lut_scan_2k`): `cargo bench -p ann-core
+  --bench search_bench` on the box; record the before/after row.
 - (d) **M5 recall recovery number**: `measure_recall.py` on the full build
   after rerank lands; sets the recall@10 gate threshold above.
 - (e) **Waterfall tolerance**: tighten `e2e_latency.py` tol from 20%+5ms to

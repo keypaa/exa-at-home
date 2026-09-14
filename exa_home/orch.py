@@ -10,10 +10,13 @@ Consumer contracts (Task 11's MCP server relies on these — keep stable):
 - Node(name, fn, deps, timeout_ms); DAG(nodes); DAG.run(inputs).
 - build_search_dag(embedder, ann, reranker, store, top_coarse=200).
 - run_search(dag, query, filters, top_k, profile).
-- Filter semantics live in the ANN backend: the retrieve node passes the
-  filters dict straight through to ann.search kwargs (terms-AND /
-  domains-OR resolved in Rust); this module never reinterprets it and
-  builds no planner here.
+- Filter semantics live in the ANN backend: the retrieve node translates
+  the spec-§7 filter dict to Rust IvfIndex.search kwargs via
+  translate_filters (date_range→month_range, keywords→terms,
+  domains/allow passthrough; unknown keys raise ValueError fail-fast,
+  surfacing as a retrieve node error, never silent), then passes the
+  translated kwargs straight through to ann.search (terms-AND /
+  domains-OR resolved in Rust); this module builds no planner here.
 - Rerank degraded items lack a "score" key while success items have one;
   the rerank node normalizes (degraded score = coarse ANN score) so
   run_search results have a uniform shape.
@@ -105,17 +108,42 @@ class DAG:
         return {"outputs": outputs, "spans": spans}
 
 
+# Spec §7 (home_search) filter shape -> Rust IvfIndex.search kwargs.
+#   date_range -> month_range, keywords -> terms,
+#   domains / month_range / terms / allow pass through unchanged.
+# Unknown keys raise ValueError (fail-fast: surfaces as a retrieve node
+# error via DAG.run, never silently ignored). Terms-AND / domains-OR
+# semantics stay untouched — they are resolved in Rust.
+SPEC_TO_RUST_FILTERS = {"date_range": "month_range", "keywords": "terms"}
+RUST_FILTER_KEYS = frozenset({"domains", "month_range", "terms", "allow"})
+
+
+def translate_filters(filters: dict) -> dict:
+    """Map the spec-shaped filter dict to IvfIndex.search kwargs."""
+    out: dict = {}
+    for k, v in (filters or {}).items():
+        rust_key = SPEC_TO_RUST_FILTERS.get(k, k)
+        if rust_key not in RUST_FILTER_KEYS:
+            raise ValueError(
+                f"unknown filter key {k!r}; allowed: "
+                f"{{domains, date_range, keywords}} (spec shape) or "
+                f"{{domains, month_range, terms, allow}} (Rust shape)")
+        out[rust_key] = v
+    return out
+
+
 def build_search_dag(embedder, ann, reranker, store, top_coarse=200, nprobe=8):
     """Assemble embed -> retrieve [filter in retrieve] -> rerank -> snippet.
 
     Every backend arrives via a constructor arg (mock-friendly). Filters
-    pass straight through to ann.search kwargs — never reinterpreted here.
+    are translated to ann.search kwargs via translate_filters — never
+    reinterpreted beyond that naming map.
     """
     def embed_fn(x):
         return embedder.encode_queries([x["query"]])[0]
 
     def retrieve_fn(x):
-        filters = x.get("filters") or {}
+        filters = translate_filters(x.get("filters") or {})
         ids, scores = ann.search(x["embed"], nprobe=nprobe,
                                  top_k=top_coarse, **filters)
         return [{"id": i, "coarse_score": float(s)}
@@ -178,7 +206,16 @@ def run_search(dag, query, filters=None, top_k=10, profile=False):
     if err:
         res["error"] = err
     if profile:
-        prof = dict(out["spans"])
-        prof["total_ms"] = wall_ms
-        res["profile"] = prof
+        spans = out["spans"]
+        # Spec §7 profile shape. Filtering happens in-scan inside the
+        # retrieve node, so filter_ms is not separately measurable: 0.0.
+        # Internal spans dict is unchanged; only this output shape maps.
+        res["profile"] = {
+            "embed_ms": spans.get("embed", 0.0),
+            "ann_ms": spans.get("retrieve", 0.0),
+            "filter_ms": 0.0,
+            "rerank_ms": spans.get("rerank", 0.0),
+            "snippet_ms": spans.get("snippet", 0.0),
+            "total_ms": wall_ms,
+        }
     return res

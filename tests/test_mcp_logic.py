@@ -119,13 +119,36 @@ def test_home_search_rejects_empty_query():
         home_search("   ")
 
 
-def test_home_search_forwards_filters_verbatim():
+def test_home_search_forwards_rust_shape_filters():
+    # Rust IvfIndex.search shapes: month_range is a tuple, allow is
+    # Vec<u32>-equivalent (list[int] row ids). The FakeANN mirrors that.
     ann = _wire()
     filters = {"terms": ["alpha"], "domains": ["example.com"],
-               "month_range": ["2026-01", "2026-08"], "allow": ["d0"]}
+               "month_range": ("2026-01", "2026-08"), "allow": [0]}
     res = home_search("q", filters=filters)
     assert ann.seen_kwargs and ann.seen_kwargs[0] == filters
     assert res["results"]
+
+
+def test_home_search_translates_spec_shape_filters():
+    # Spec §7 shape {date_range, keywords} maps through orch's translation
+    # layer to Rust kwargs {month_range, terms} before ann.search.
+    ann = _wire()
+    res = home_search("q", filters={"date_range": ("2026-01", "2026-08"),
+                                    "keywords": ["alpha"],
+                                    "domains": ["example.com"]})
+    assert ann.seen_kwargs and ann.seen_kwargs[0] == {
+        "month_range": ("2026-01", "2026-08"),
+        "terms": ["alpha"],
+        "domains": ["example.com"]}
+    assert res["results"]
+
+
+def test_home_search_rejects_unknown_filter_keys():
+    from exa_home import orch
+    import pytest as _pytest
+    with _pytest.raises(ValueError, match="unknown filter key"):
+        orch.translate_filters({"bogus": ["x"]})
 
 
 def test_home_search_arg_order_matches_orch_contract():

@@ -111,7 +111,20 @@ def test_filters_pass_straight_through_to_ann():
     filters = {"domains": ["example.com"], "terms": ["alpha", "beta"]}
     res = run_search(dag, "q", filters, top_k=5)
     assert ann.seen_kwargs and ann.seen_kwargs[0] == filters
-    assert res["results"]  # non-empty: orch never interprets filters
+    assert res["results"]  # non-empty: orch only renames, never interprets
+
+
+def test_spec_shape_filters_translate_to_rust_kwargs():
+    from exa_home.orch import translate_filters
+    assert translate_filters({"date_range": ("2026-01", "2026-08"),
+                              "keywords": ["a"],
+                              "domains": ["example.com"]}) == {
+        "month_range": ("2026-01", "2026-08"),
+        "terms": ["a"],
+        "domains": ["example.com"]}
+    import pytest
+    with pytest.raises(ValueError, match="unknown filter key"):
+        translate_filters({"bogus": 1})
 
 
 def test_degraded_rerank_has_uniform_score_shape():

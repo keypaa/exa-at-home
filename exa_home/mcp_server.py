@@ -24,8 +24,9 @@ def home_search(query: str, filters: dict | None = None, top_k: int = 10,
     from .orch import build_search_dag, run_search
     dag = build_search_dag(_deps["embedder"], _deps["ann"],
                            _deps["reranker"], _deps["store"])
-    # Exact Task 10 arg order; filters=None means {}. Filters pass through
-    # to the Rust ANN backend verbatim — never reinterpreted here.
+    # Exact Task 10 arg order; filters=None means {}. Spec-shaped filters
+    # ({domains, date_range, keywords}) are translated to Rust kwargs in
+    # orch.retrieve via translate_filters — never reinterpreted here.
     res = run_search(dag, query, filters or {}, top_k, profile)
     # run_search results carry {id, snippet, score, coarse_score}; enrich
     # with url/title from the content store for the MCP contract shape.

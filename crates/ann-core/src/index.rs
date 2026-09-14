@@ -88,6 +88,16 @@ pub fn load(dir: &Path) -> Result<Loaded, String> {
         .get("files")
         .and_then(|v| v.as_object())
         .ok_or_else(|| format!("{MANIFEST} missing object 'files'"))?;
+    // The four core files load unconditionally below, so a tampered
+    // manifest omitting one must fail here — not load it unchecked.
+    // (Same pin pattern as the six filter files further down.)
+    for name in [CENTROIDS_FILE, CODES_FILE, LISTS_FILE, DOC_IDS_FILE] {
+        if !files.contains_key(name) {
+            return Err(format!(
+                "{MANIFEST} has no checksum for {name} (required core file)"
+            ));
+        }
+    }
     // Deterministic check order (BTreeMap over the JSON map).
     let want: BTreeMap<&str, &str> = files
         .iter()
@@ -356,6 +366,17 @@ mod tests {
         assert!(load(&dir)
             .unwrap_err()
             .contains("unsupported index version"));
+        let _ = fs::remove_dir_all(&dir);
+
+        // Tampered manifest omitting a core file -> rejected before load.
+        let dir = fixture_dir("omit");
+        let mraw = fs::read(dir.join(MANIFEST)).unwrap();
+        let mut m: serde_json::Value = serde_json::from_slice(&mraw).unwrap();
+        m["files"].as_object_mut().unwrap().remove(CODES_FILE);
+        fs::write(dir.join(MANIFEST), serde_json::to_string(&m).unwrap()).unwrap();
+        assert!(load(&dir)
+            .unwrap_err()
+            .contains("no checksum for codes.bin"));
         let _ = fs::remove_dir_all(&dir);
 
         // Drop one id -> ids-length error.
