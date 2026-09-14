@@ -36,21 +36,24 @@ sys.path.insert(0, ROOT)
 CHUNK = 50_000
 
 
-def assign(vecs, centroids):
+def assign(vecs, centroids, verbose: bool = False):
     import numpy as np
 
     n = len(vecs)
     out = np.empty(n, dtype=np.int64)
-    for s in range(0, n, CHUNK):
+    n_chunks = (n + CHUNK - 1) // CHUNK
+    for i, s in enumerate(range(0, n, CHUNK)):
         e = min(s + CHUNK, n)
         out[s:e] = np.argmax(vecs[s:e] @ centroids.T, axis=1)
+        if verbose and (i + 1) % max(1, n_chunks // 10) == 0:
+            print(f"assign: chunk {i + 1}/{n_chunks} ({e}/{n} docs)", flush=True)
     return out
 
 
 def main(vecs_path: str, ids_path: str, centroids_path: str, docs_path: str,
          out: str, store: str | None = None, no_store: bool = False,
          filter: bool = False, max_terms: int = 50_000,
-         crawl: str = "CC-MAIN-2026-34") -> dict:
+         crawl: str = "CC-MAIN-2026-34", verbose: bool = False) -> dict:
     import numpy as np
 
     from exa_home.index_format import (
@@ -72,7 +75,9 @@ def main(vecs_path: str, ids_path: str, centroids_path: str, docs_path: str,
     n, k = len(vecs), len(centroids)
 
     os.makedirs(out, exist_ok=True)
-    assign_v = assign(vecs, centroids)
+    if verbose:
+        print(f"assign: {n} docs -> {k} clusters (50k-row chunks)", flush=True)
+    assign_v = assign(vecs, centroids, verbose=verbose)
 
     centroids.astype("<f4").tofile(os.path.join(out, CENTROIDS_FILE))
     pack = np.packbits((vecs > 0).astype(np.uint8), axis=1, bitorder="little")
@@ -84,6 +89,8 @@ def main(vecs_path: str, ids_path: str, centroids_path: str, docs_path: str,
             rows = np.where(assign_v == c)[0].astype("<u4")
             f.write(struct.pack("<I", len(rows)))
             f.write(rows.tobytes())
+            if verbose and (c + 1) % max(1, k // 10) == 0:
+                print(f"lists: {c + 1}/{k} posting lists", flush=True)
     with open(os.path.join(out, DOC_IDS_FILE), "w") as f:
         json.dump(ids, f)
 
@@ -99,6 +106,8 @@ def main(vecs_path: str, ids_path: str, centroids_path: str, docs_path: str,
                 if line:
                     cs.put(json.loads(line))
                     n_stored += 1
+                    if verbose and n_stored % 100_000 == 0:
+                        print(f"store: {n_stored} docs", flush=True)
         if n_stored != n:
             raise ValueError(f"{docs_path}: {n_stored} docs vs {n} vecs")
 
@@ -134,6 +143,8 @@ if __name__ == "__main__":
                     help="also build index/filter/ (needs pyroaring)")
     ap.add_argument("--max-terms", type=int, default=50_000)
     ap.add_argument("--crawl", default="CC-MAIN-2026-34")
+    ap.add_argument("--verbose", action="store_true",
+                    help="progress output (assign/store/lists stages)")
     a = ap.parse_args()
     main(a.vecs, a.ids, a.centroids, a.docs, a.out, a.store, a.no_store,
-         a.filter, a.max_terms, a.crawl)
+         a.filter, a.max_terms, a.crawl, verbose=a.verbose)
