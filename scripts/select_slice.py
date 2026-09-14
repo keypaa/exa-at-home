@@ -63,7 +63,10 @@ def to_urls(rows: list[tuple]) -> list[str]:
 def main(crawl: str, limit_wet: int, out: str) -> list[str]:
     import duckdb  # cloud-only import: needs network + DuckDB HTTPS support
 
-    rows = duckdb.connect().execute(render_sql(crawl, limit_wet)).fetchall()
+    # Generic-HTTP globs need an explicit opt-in on current DuckDB versions.
+    con = duckdb.connect()
+    con.execute("SET allow_asterisks_in_http_paths = true")
+    rows = con.execute(render_sql(crawl, limit_wet)).fetchall()
     urls = to_urls(rows)
     with open(out, "w") as f:
         for u in urls:
