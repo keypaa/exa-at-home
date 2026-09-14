@@ -38,9 +38,11 @@ class Embedder:
     def __init__(self, model: str = "Snowflake/snowflake-arctic-embed-m-v2.0", dim: int = 256):
         from sentence_transformers import SentenceTransformer
         self.dim = dim
-        # Native ST model: no trust_remote_code unless on-box load proves otherwise.
+        # Arctic-m-v2.0 ships custom modeling code: trust_remote_code=True is
+        # REQUIRED (verified on-box 2026-09-14: load fails without it).
         # truncate_dim=256 maps to the model's native two-stage MRL-256 point.
-        self.model = SentenceTransformer(model, truncate_dim=dim)
+        self.model = SentenceTransformer(model, truncate_dim=dim,
+                                         trust_remote_code=True)
 
     def _encode(self, texts: list[str], **prompt_kwargs) -> np.ndarray:
         v = self.model.encode(texts, normalize_embeddings=True,
