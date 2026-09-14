@@ -101,7 +101,7 @@ def build_real_dag(index_dir: str, store_dir: str | None, embedder_kind: str,
 
     from ann_core import IvfIndex  # noqa: E402  (maturin develop on-box)
 
-    if embedder_kind == "arctic":
+    if embedder_kind in ("arctic", "real"):  # "arctic" kept as alias (pre-switch runs)
         from exa_home.embed import Embedder
         embedder = Embedder()
     else:
@@ -175,7 +175,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--k", type=int, default=10)
     ap.add_argument("--budget-ms", type=float, default=100.0)
-    ap.add_argument("--embedder", choices=["hash", "arctic"], default="hash")
+    ap.add_argument("--embedder", choices=["hash", "arctic", "real"], default="hash")
     ap.add_argument("--reranker", choices=["mock", "real"], default="mock")
     ap.add_argument("--nprobe", type=int, default=8)
     ap.add_argument("--top-coarse", type=int, default=200)

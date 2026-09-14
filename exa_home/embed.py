@@ -3,7 +3,8 @@ from __future__ import annotations
 import hashlib
 import numpy as np
 
-# Arctic-m-v2.0 prompt contract (VERIFY ON BOX: confirm doc side needs no prefix).
+# mxbai-embed-large-v1 prompt contract (verified on card: query prompt is built
+# into the ST config as prompt_name="query"; docs encode unprefixed).
 # ST usage: model.encode(texts, prompt_name="query") for queries, plain for docs.
 QUERY_KWARGS = {"prompt_name": "query"}
 DOC_KWARGS = {}
@@ -27,7 +28,7 @@ class HashEmbedder:
 
 _singleton = None
 
-def get_embedder(model: str = "Snowflake/snowflake-arctic-embed-m-v2.0", dim: int = 256):
+def get_embedder(model: str = "mixedbread-ai/mxbai-embed-large-v1", dim: int = 256):
     """Persistent singleton. First call loads GPU model; never call per-query cold."""
     global _singleton
     if _singleton is None:
@@ -35,14 +36,16 @@ def get_embedder(model: str = "Snowflake/snowflake-arctic-embed-m-v2.0", dim: in
     return _singleton
 
 class Embedder:
-    def __init__(self, model: str = "Snowflake/snowflake-arctic-embed-m-v2.0", dim: int = 256):
+    def __init__(self, model: str = "mixedbread-ai/mxbai-embed-large-v1", dim: int = 256):
         from sentence_transformers import SentenceTransformer
         self.dim = dim
-        # Arctic-m-v2.0 ships custom modeling code: trust_remote_code=True is
-        # REQUIRED (verified on-box 2026-09-14: load fails without it).
-        # truncate_dim=256 maps to the model's native two-stage MRL-256 point.
-        self.model = SentenceTransformer(model, truncate_dim=dim,
-                                         trust_remote_code=True)
+        # mxbai-large-v1: plain BERT, no custom modeling code, no
+        # trust_remote_code, no xformers (vendor: "No fancy custom code or
+        # trust remote code required"). Chosen 2026-09-14 after Arctic-m-v2.0
+        # proved unloadable (hard xformers assert in its custom modeling
+        # file). truncate_dim=256 uses the model's MRL support; 256-dim
+        # quality is MEASURED by our recall harness, not vendor-claimed.
+        self.model = SentenceTransformer(model, truncate_dim=dim)
 
     def _encode(self, texts: list[str], **prompt_kwargs) -> np.ndarray:
         v = self.model.encode(texts, normalize_embeddings=True,

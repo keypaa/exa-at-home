@@ -7,7 +7,6 @@ dependencies = [
   "warcio>=1.7",
   "sentence-transformers>=2.2",
   "torch",
-  "xformers",  # required by Arctic-m-v2.0 custom modeling code (verified on-box)
   "fastmcp",
   "duckdb",
   "scikit-learn",

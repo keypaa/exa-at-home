@@ -129,7 +129,7 @@ Namespaced `home_*` to avoid confusion with real Exa tools in the same client.
 
 ## 11. Pre-implementation decisions (resolved 2026-09-13 via bounded research)
 
-- ~~Exact embedding model pick~~ → `Snowflake/snowflake-arctic-embed-m-v2.0` (native MRL-256, ~99% retention, Apache-2.0). RESOLVED.
+- ~~Exact embedding model pick~~ → `mixedbread-ai/mxbai-embed-large-v1` (MRL + `truncate_dim=256`, `prompt_name="query"`, Apache-2.0, no custom code). SUPERSEDES 2026-09-14: Arctic-m-v2.0 unloadable (hard xformers assert in custom modeling file; also failed in public benchmark runtimes). 256-dim quality now MEASURED by our recall harness, not vendor-claimed.
 - ~~Rust↔Python bridge choice~~ → PyO3 via maturin (in-process FFI, zero IPC overhead). RESOLVED.
 - ~~Cross-encoder reranker model pick within rerank budget~~ → `cross-encoder/ms-marco-MiniLM-L6-v2` (200 pairs ~6–10ms at batch 128 fp16, inside 40ms slice; Apache-2.0). RESOLVED.
 - ~~Common Crawl slice selection~~ → `CC-MAIN-2026-34`, WET files (~130 for 1M / ~620 for 5M English pages), dedup by `content_digest` then URL. Locked pending on-box toy validation.
