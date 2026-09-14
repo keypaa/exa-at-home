@@ -529,7 +529,7 @@ git commit -m "feat: frozen Arctic-m embedder (native MRL-256) + hash stub"
 
 **Interfaces:**
 - Consumes: `synth.make_vectors` (Task 1).
-- Produces: `ann_core.AnnIndex(rows: np.ndarray[float32], ids: list[str])`, `.search(query: np.ndarray, top_k: int) -> (ids: list[str], scores: list[float])` (exact float dot, M1 baseline); `scripts/ground_truth.py` writing `gt.jsonl` (`{query_id, top10_ids}`); `index_format.write_manifest(dir, meta)` / `verify_manifest(dir)` (sha256 per file, fail-fast).
+- Produces: `ann_core.AnnIndex(rows: np.ndarray[float32], ids: list[str])`, `.search(query: np.ndarray, top_k: int) -> (ids: list[str], scores: list[float])` (exact float dot, M1 baseline); `scripts/ground_truth.py` writing `gt.jsonl` (`{query_id, top10}` — the `top10` key is canonical; the interfaces line previously said `top10_ids`, corrected per Task 4 review); `index_format.write_manifest(dir, meta)` / `verify_manifest(dir)` (sha256 per file, fail-fast).
 
 - [ ] **Step 1: Write failing Python test (M1 contract)**
 
