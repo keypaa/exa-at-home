@@ -94,7 +94,8 @@ def build_synth_dag(n_docs: int = 500, seed: int = 0,
 
 
 def build_real_dag(index_dir: str, store_dir: str | None, embedder_kind: str,
-                   reranker_kind: str, top_coarse: int, nprobe: int):
+                   reranker_kind: str, top_coarse: int, nprobe: int,
+                   max_pair_tokens: int = 160, batch_size: int = 128):
     """Cloud-only path: IvfIndex over a built index/ dir. Lazy imports."""
     from exa_home.orch import build_search_dag
     from exa_home.store import ContentStore
@@ -109,7 +110,8 @@ def build_real_dag(index_dir: str, store_dir: str | None, embedder_kind: str,
         embedder = HashEmbedder(dim=256)
     if reranker_kind == "real":
         from exa_home.rerank import Reranker
-        reranker = Reranker()
+        reranker = Reranker(max_pair_tokens=max_pair_tokens,
+                            batch_size=batch_size)
     else:
         from exa_home.rerank import MockReranker
         reranker = MockReranker()
@@ -179,6 +181,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--reranker", choices=["mock", "real"], default="mock")
     ap.add_argument("--nprobe", type=int, default=8)
     ap.add_argument("--top-coarse", type=int, default=200)
+    ap.add_argument("--max-pair-tokens", type=int, default=160,
+                    help="reranker pair truncation (real reranker only)")
+    ap.add_argument("--batch-size", type=int, default=128,
+                    help="reranker batch size (real reranker only)")
     a = ap.parse_args(argv)
 
     try:
@@ -206,7 +212,9 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         try:
             dag = build_real_dag(a.index, a.store, a.embedder, a.reranker,
-                                 a.top_coarse, a.nprobe)
+                                 a.top_coarse, a.nprobe,
+                                 max_pair_tokens=a.max_pair_tokens,
+                                 batch_size=a.batch_size)
         except ImportError as e:
             print(f"e2e_latency: cloud-only backend unavailable: {e}",
                   file=sys.stderr)
