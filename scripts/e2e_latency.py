@@ -95,7 +95,8 @@ def build_synth_dag(n_docs: int = 500, seed: int = 0,
 
 def build_real_dag(index_dir: str, store_dir: str | None, embedder_kind: str,
                    reranker_kind: str, top_coarse: int, nprobe: int,
-                   max_pair_tokens: int = 160, batch_size: int = 128):
+                   max_pair_tokens: int = 160, batch_size: int = 128,
+                   max_query_tokens: int = 32):
     """Cloud-only path: IvfIndex over a built index/ dir. Lazy imports."""
     from exa_home.orch import build_search_dag
     from exa_home.store import ContentStore
@@ -111,7 +112,8 @@ def build_real_dag(index_dir: str, store_dir: str | None, embedder_kind: str,
     if reranker_kind == "real":
         from exa_home.rerank import Reranker
         reranker = Reranker(max_pair_tokens=max_pair_tokens,
-                            batch_size=batch_size)
+                            batch_size=batch_size,
+                            max_query_tokens=max_query_tokens)
     else:
         from exa_home.rerank import MockReranker
         reranker = MockReranker()
@@ -122,10 +124,12 @@ def build_real_dag(index_dir: str, store_dir: str | None, embedder_kind: str,
                             top_coarse=top_coarse, nprobe=nprobe)
 
 
-def run_latency(dag, queries: list[dict], k: int) -> dict:
+def run_latency(dag, queries: list[dict], k: int, verbose: bool = False) -> dict:
     """Run every query with profile=True; collect per-stage ms + totals."""
     from exa_home.orch import run_search
 
+    import time
+    t_run = time.perf_counter()
     per_stage = {s: [] for s in STAGE_ORDER}
     totals: list[float] = []
     violations: list[tuple] = []
@@ -141,6 +145,14 @@ def run_latency(dag, queries: list[dict], k: int) -> dict:
         for s in STAGE_ORDER:
             per_stage[s].append(prof[s])
         totals.append(wall)
+        if verbose and (i + 1) % max(1, len(queries) // 10) == 0:
+            el = time.perf_counter() - t_run
+            print(f"e2e: query {i + 1}/{len(queries)} "
+                  f"(last total={wall:.0f}ms, degraded={res.get('degraded')}, "
+                  f"elapsed={el:.0f}s)", flush=True)
+    if verbose:
+        print(f"e2e: done {len(queries)} queries in "
+              f"{time.perf_counter() - t_run:.1f}s", flush=True)
     return {"stages": per_stage, "total": totals,
             "violations": violations, "n": len(queries)}
 
@@ -185,6 +197,10 @@ def main(argv: list[str] | None = None) -> int:
                     help="reranker pair truncation (real reranker only)")
     ap.add_argument("--batch-size", type=int, default=128,
                     help="reranker batch size (real reranker only)")
+    ap.add_argument("--max-query-tokens", type=int, default=32,
+                    help="reranker query truncation (real reranker only)")
+    ap.add_argument("--verbose", action="store_true",
+                    help="per-10%% query progress + run wall time")
     a = ap.parse_args(argv)
 
     try:
@@ -214,13 +230,14 @@ def main(argv: list[str] | None = None) -> int:
             dag = build_real_dag(a.index, a.store, a.embedder, a.reranker,
                                  a.top_coarse, a.nprobe,
                                  max_pair_tokens=a.max_pair_tokens,
-                                 batch_size=a.batch_size)
+                                 batch_size=a.batch_size,
+                                 max_query_tokens=a.max_query_tokens)
         except ImportError as e:
             print(f"e2e_latency: cloud-only backend unavailable: {e}",
                   file=sys.stderr)
             return 2
 
-    stats = run_latency(dag, queries, a.k)
+    stats = run_latency(dag, queries, a.k, verbose=a.verbose)
     print(report(stats, a.budget_ms))
     if stats["violations"]:
         return 2

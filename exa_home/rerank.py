@@ -22,12 +22,17 @@ class MockReranker:
 
 class Reranker:
     def __init__(self, model="cross-encoder/ms-marco-MiniLM-L6-v2",
-                 timeout_ms=100, batch_size=128, device=None, max_pair_tokens=160):
+                 timeout_ms=100, batch_size=128, device=None, max_pair_tokens=160,
+                 max_query_tokens=32):
         from sentence_transformers import CrossEncoder
         import torch
         self.timeout_ms = timeout_ms
         self.batch_size = batch_size
         self.max_pair_tokens = max_pair_tokens  # truncate pairs to 128-192 tokens for budget
+        # The QUERY was unbounded: 200 chars of CJK spam tokenize to ~170
+        # tokens and every pair pads to the longest, so one long query
+        # multiplies the whole batch cost (found on-box 2026-09-15).
+        self.max_query_tokens = max_query_tokens
         dev = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.device = dev
         self.model = CrossEncoder(model, device=dev)
@@ -44,7 +49,10 @@ class Reranker:
 
     def _score_batch(self, query, texts):
         # Truncate each pair to max_pair_tokens so the 6-10ms/200-pair budget holds.
-        pairs = [[query, " ".join(t.split()[: self.max_pair_tokens])] for t in texts]
+        # Query is truncated too (it was unbounded: ~170 tokens of CJK spam
+        # pads every pair in the batch via attention-quadratic cost).
+        q = " ".join(query.split()[: self.max_query_tokens])
+        pairs = [[q, " ".join(t.split()[: self.max_pair_tokens])] for t in texts]
         return self.model.predict(pairs, batch_size=self.batch_size,
                                   show_progress_bar=False).tolist()
 
