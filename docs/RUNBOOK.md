@@ -73,12 +73,21 @@ Slice sizes (researched, locked): **1M ≈ top-130 WET (~8GB)**;
 
 ```bash
 # toy slice (4 WET, ~10k docs)
-python scripts/select_slice.py --crawl CC-MAIN-2026-34 --lang eng \
-    --limit-wet 4 --out wet_urls.txt
-# 1M slice (~130 WET, ~8GB)
+# NOTE (verified on-box 2026-09-14/15): the columnar-index HTTPS path 404s —
+# the cc-index/table prefix does not resolve over data.commoncrawl.org.
+# Until the correct layout is found, take WET files straight from wet.paths.gz
+# (no density ranking; fine for the toy — ingest dedups downstream):
+curl -s "https://data.commoncrawl.org/crawl-data/CC-MAIN-2026-34/wet.paths.gz" \
+    -o /tmp/wetpaths.gz --max-time 60 \
+  && zcat /tmp/wetpaths.gz | head -4 \
+  | sed 's|^|https://data.commoncrawl.org/|' > wet_urls.txt \
+  && cat wet_urls.txt
+# 1M slice (~130 WET, ~8GB) — BLOCKED on the columnar fix above; the toy
+# workaround generalizes (head -130) but without English-density ranking
+# you download ~2.5x more for the same English yield. Fix the layout first.
 python scripts/select_slice.py --crawl CC-MAIN-2026-34 --lang eng \
     --limit-wet 130 --out wet_urls_1M.txt
-# 5M slice (~620 WET, ~38GB)
+# 5M slice (~620 WET, ~38GB) — same blocker as 1M.
 python scripts/select_slice.py --crawl CC-MAIN-2026-34 --lang eng \
     --limit-wet 620 --out wet_urls_5M.txt
 ```
