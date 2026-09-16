@@ -14,9 +14,20 @@ commands in §6 produce exactly those (no overrides, no flags to relocate them).
 
 ---
 
-## 0. Local machine setup (ledger-recorded rulings — do these first)
+## 0. Box setup — Rust, venv, binding (do these first, every fresh box)
 
-Three workarounds baked in from the local-toolchain investigation:
+```bash
+git clone https://github.com/keypaa/exa-at-home.git && cd exa-at-home
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+source "$HOME/.cargo/env" && cargo --version   # expect 1.9x
+python -m venv .venv && source .venv/bin/activate
+pip install -e .                               # NOT .[dev]: maturin below covers it
+pip install "maturin>=1.0"
+cd crates/ann-core && maturin develop && cd ../..
+```
+
+Three workarounds baked in from the local-toolchain investigation
+(skip 2 entirely on Python ≤3.13 — the ABI gate only bites 3.14):
 
 1. **PEP-668 systems** (externally managed Python): never `pip install`
    system-wide. Always:
