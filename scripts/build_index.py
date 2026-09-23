@@ -100,6 +100,9 @@ def main(vecs_path: str, ids_path: str, centroids_path: str, docs_path: str,
 
         store_dir = store or os.path.join(out, "store")
         cs = ContentStore(store_dir)
+        # Track offsets during the bulk write so no rescan is needed:
+        # save_index() persists store/offsets.json for O(1) cold gets.
+        cs.begin_bulk()
         with open(docs_path, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
@@ -110,6 +113,7 @@ def main(vecs_path: str, ids_path: str, centroids_path: str, docs_path: str,
                         print(f"store: {n_stored} docs", flush=True)
         if n_stored != n:
             raise ValueError(f"{docs_path}: {n_stored} docs vs {n} vecs")
+        cs.save_index()
 
     if filter:
         from scripts.build_filter import build as build_filter

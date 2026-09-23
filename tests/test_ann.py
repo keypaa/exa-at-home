@@ -138,8 +138,12 @@ def test_ivf_load_rejects_corruption(tmp_path):
 def test_train_centroids_importable():
     import inspect
     from scripts.train_centroids import main as train
-    assert list(inspect.signature(train).parameters) == \
-        ["vecs_path", "k", "sample", "out", "seed"]
+    params = list(inspect.signature(train).parameters)
+    assert params[:5] == ["vecs_path", "k", "sample", "out", "seed"]
+    # verbose is an optional additive flag (default False), not a contract break
+    if len(params) > 5:
+        assert params[5] == "verbose"
+        assert inspect.signature(train).parameters["verbose"].default is False
 
 
 def test_train_centroids_cli_help():

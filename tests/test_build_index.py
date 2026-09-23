@@ -90,10 +90,14 @@ def test_build_index_roundtrip_200_docs(tmp_path):
     assert json.loads((out / DOC_IDS_FILE).read_text()) == ids
 
     # The default <out>/store serves back doc text (home_contents path).
-    from exa_home.store import ContentStore
+    from exa_home.store import OFFSETS_FILENAME, ContentStore
+    # Offset index written at build time and covered by the manifest.
+    assert (out / "store" / OFFSETS_FILENAME).exists()
+    assert any(k.endswith(OFFSETS_FILENAME) for k in m["files"])
     cs = ContentStore(str(out / "store"))
     assert cs.get(ids[0])["text"] == docs[0]["text"]
     assert cs.get(ids[-1])["text"] == docs[-1]["text"]
+    assert cs._index is not None and len(cs._index) == n
 
 
 def test_build_index_rejects_shape_mismatch(tmp_path):
