@@ -138,25 +138,42 @@ def build_search_dag(embedder, ann, reranker, store, top_coarse=200, nprobe=8):
     Every backend arrives via a constructor arg (mock-friendly). Filters
     are translated to ann.search kwargs via translate_filters — never
     reinterpreted beyond that naming map.
+
+    Sub-span side channel: run_search injects a mutable ``_parts`` dict
+    into the DAG inputs; node fns record fetch/model splits there. This
+    is the one sanctioned mutation (DAG.run still shallow-copies outputs
+    per node; only the shared ``_parts`` dict is written through).
     """
     def embed_fn(x):
         return embedder.encode_queries([x["query"]])[0]
 
     def retrieve_fn(x):
+        t0 = time.perf_counter()
         filters = translate_filters(x.get("filters") or {})
+        parts = x.get("_parts")
+        if parts is not None:
+            parts["filter_translate_ms"] = (time.perf_counter() - t0) * 1000
         ids, scores = ann.search(x["embed"], nprobe=nprobe,
                                  top_k=top_coarse, **filters)
         return [{"id": i, "coarse_score": float(s)}
                 for i, s in zip(ids, scores)]
 
     def rerank_fn(x):
+        parts = x.get("_parts")
+        t0 = time.perf_counter()
         cands = []
         for c in x["retrieve"]:
             doc = store.get(c["id"])
             text = (doc.get("text", "") if doc else "")
             cands.append({"id": c["id"], "text": text,
                           "coarse_score": c["coarse_score"]})
+        fetch_ms = (time.perf_counter() - t0) * 1000
+        t1 = time.perf_counter()
         ranked, degraded = reranker.rerank(x["query"], cands)
+        model_ms = (time.perf_counter() - t1) * 1000
+        if parts is not None:
+            parts["rerank_fetch_ms"] = fetch_ms
+            parts["rerank_model_ms"] = model_ms
         norm = []
         for item in ranked:
             item = dict(item)
@@ -170,6 +187,8 @@ def build_search_dag(embedder, ann, reranker, store, top_coarse=200, nprobe=8):
         return {"ranked": norm, "degraded": bool(degraded)}
 
     def snippet_fn(x):
+        parts = x.get("_parts")
+        t0 = time.perf_counter()
         top_k = x.get("top_k", 10)
         out = []
         for item in x["rerank"]["ranked"][:top_k]:
@@ -182,6 +201,9 @@ def build_search_dag(embedder, ann, reranker, store, top_coarse=200, nprobe=8):
                         "snippet": (text or "")[:SNIPPET_CHARS],
                         "score": item["score"],
                         "coarse_score": item.get("coarse_score")})
+        if parts is not None:
+            # Snippet fetch is the store.get loop; formatting is negligible.
+            parts["snippet_fetch_ms"] = (time.perf_counter() - t0) * 1000
         return out
 
     return DAG([Node("embed", embed_fn, []),
@@ -197,7 +219,9 @@ def run_search(dag, query, filters=None, top_k=10, profile=False):
     when profile=True, plus "error" when a node failed (results [] then).
     """
     t0 = time.perf_counter()
-    out = dag.run({"query": query, "filters": filters or {}, "top_k": top_k})
+    parts: dict = {}
+    out = dag.run({"query": query, "filters": filters or {}, "top_k": top_k,
+                   "_parts": parts})
     wall_ms = (time.perf_counter() - t0) * 1000
     err = out.get("error")
     rerank_out = out["outputs"].get("rerank") or {}
@@ -207,15 +231,18 @@ def run_search(dag, query, filters=None, top_k=10, profile=False):
         res["error"] = err
     if profile:
         spans = out["spans"]
-        # Spec §7 profile shape. Filtering happens in-scan inside the
-        # retrieve node, so filter_ms is not separately measurable: 0.0.
-        # Internal spans dict is unchanged; only this output shape maps.
+        # filter_ms is the measured filter-translation time (in-scan
+        # intersect itself stays inside ann_ms — the retrieve node owns
+        # both, so the waterfall keeps ann as the stage).
         res["profile"] = {
             "embed_ms": spans.get("embed", 0.0),
             "ann_ms": spans.get("retrieve", 0.0),
-            "filter_ms": 0.0,
+            "filter_ms": parts.get("filter_translate_ms", 0.0),
             "rerank_ms": spans.get("rerank", 0.0),
+            "rerank_fetch_ms": parts.get("rerank_fetch_ms", 0.0),
+            "rerank_model_ms": parts.get("rerank_model_ms", 0.0),
             "snippet_ms": spans.get("snippet", 0.0),
+            "snippet_fetch_ms": parts.get("snippet_fetch_ms", 0.0),
             "total_ms": wall_ms,
         }
     return res

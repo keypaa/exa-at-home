@@ -40,6 +40,22 @@ def test_synth_e2e_waterfall_and_shape_in_process():
     assert len(res["results"]) <= 10 and res["degraded"] is False
 
 
+def test_ledger_appends_one_json_row_per_run(tmp_path):
+    from scripts.e2e_latency import append_ledger, build_synth_dag, run_latency
+    dag = build_synth_dag(n_docs=100, seed=1)
+    queries = [{"query": f"topic {i} neural search", "filters": {}}
+               for i in range(5)]
+    stats = run_latency(dag, queries, k=5)
+    ledger = tmp_path / "runs.jsonl"
+    append_ledger(str(ledger), {"ann": "fake", "n_docs": 100}, stats)
+    import json
+    rows = [json.loads(l) for l in open(ledger, encoding="utf-8")]
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["config"]["ann"] == "fake" and row["n"] == 5
+    assert "p50_ms" in row and "p99_ms" in row and "git" in row
+
+
 def test_over_budget_exits_one():
     r = subprocess.run(
         [sys.executable, SCRIPTS_E2E, "--ann", "fake",

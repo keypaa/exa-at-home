@@ -95,7 +95,9 @@ def test_search_waterfall_sums_to_wall():
     dag = build_search_dag(FakeEmbedder(), FakeANN(), FakeReranker(),
                            FakeStore(_docs()))
     res = run_search(dag, "topic 3", {}, top_k=5, profile=True)
-    assert abs(sum(v for k, v in res["profile"].items() if k != "total_ms")
+    stage_keys = ("embed_ms", "ann_ms", "filter_ms", "rerank_ms",
+                  "snippet_ms")
+    assert abs(sum(res["profile"][k] for k in stage_keys)
                - res["profile"]["total_ms"]) \
         < res["profile"]["total_ms"] * 0.2 + 5
     assert [r["id"] for r in res["results"]] == ["d0", "d1", "d2"]
@@ -164,6 +166,21 @@ def test_run_search_reports_node_error_without_raising():
     assert res["results"] == [] and res["degraded"] is True
     assert res["error"]["node"] == "retrieve"
     assert "total_ms" in res["profile"]
+
+
+def test_profile_splits_rerank_fetch_vs_model():
+    """The M5b lesson: rerank_ms must decompose into store-fetch vs
+    model time so a store regression can't masquerade as GPU time."""
+    dag = build_search_dag(FakeEmbedder(), FakeANN(), FakeReranker(),
+                           FakeStore(_docs()))
+    res = run_search(dag, "topic 3", {}, top_k=5, profile=True)
+    p = res["profile"]
+    assert p["rerank_fetch_ms"] >= 0.0
+    assert p["rerank_model_ms"] >= 0.0
+    assert p["snippet_fetch_ms"] >= 0.0
+    assert abs((p["rerank_fetch_ms"] + p["rerank_model_ms"])
+               - p["rerank_ms"]) < p["rerank_ms"] * 0.2 + 1.0
+    assert p["snippet_fetch_ms"] <= p["snippet_ms"] + 1.0
 
 
 def test_dag_rejects_cycles_and_unknown_deps():

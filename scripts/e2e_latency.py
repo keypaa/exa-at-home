@@ -22,9 +22,13 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "tests"))
 
-# Spec §7 profile keys from run_search (filter_ms is in-scan, always 0.0 —
-# excluded from the waterfall sum so the integrity check is unchanged).
+# Spec §7 profile keys from run_search (filter_ms is the measured
+# translate time; the in-scan intersect stays inside ann_ms, so filter
+# is excluded from the waterfall sum — integrity check unchanged).
 STAGE_ORDER = ("embed_ms", "ann_ms", "rerank_ms", "snippet_ms")
+# M5b sub-spans: collected + reported + ledgered, never in the sum.
+BREAKDOWN_KEYS = ("filter_ms", "rerank_fetch_ms", "rerank_model_ms",
+                  "snippet_fetch_ms")
 
 
 def pct(xs, p):
@@ -131,6 +135,7 @@ def run_latency(dag, queries: list[dict], k: int, verbose: bool = False) -> dict
     import time
     t_run = time.perf_counter()
     per_stage = {s: [] for s in STAGE_ORDER}
+    breakdown: dict = {s: [] for s in BREAKDOWN_KEYS}
     totals: list[float] = []
     violations: list[tuple] = []
     for i, q in enumerate(queries):
@@ -144,6 +149,8 @@ def run_latency(dag, queries: list[dict], k: int, verbose: bool = False) -> dict
             violations.append((i, stage_sum, wall))
         for s in STAGE_ORDER:
             per_stage[s].append(prof[s])
+        for s in BREAKDOWN_KEYS:
+            breakdown[s].append(prof.get(s, 0.0))
         totals.append(wall)
         if verbose and (i + 1) % max(1, len(queries) // 10) == 0:
             el = time.perf_counter() - t_run
@@ -153,8 +160,43 @@ def run_latency(dag, queries: list[dict], k: int, verbose: bool = False) -> dict
     if verbose:
         print(f"e2e: done {len(queries)} queries in "
               f"{time.perf_counter() - t_run:.1f}s", flush=True)
-    return {"stages": per_stage, "total": totals,
+    return {"stages": per_stage, "breakdown": breakdown, "total": totals,
             "violations": violations, "n": len(queries)}
+
+
+def _git_hash() -> str:
+    try:
+        import subprocess
+        r = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
+                           capture_output=True, text=True, timeout=10,
+                           cwd=ROOT)
+        return r.stdout.strip() if r.returncode == 0 else "unknown"
+    except Exception:
+        return "unknown"
+
+
+def append_ledger(path: str, config: dict, stats: dict) -> dict:
+    """Append one JSON row per gate run (the EXPERIMENTS.md source).
+
+    Row: {ts, git, config, n, p50_ms, p99_ms, stages: {stage: {p50, p99}}}.
+    Returns the row written.
+    """
+    import datetime
+    row = {
+        "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "git": _git_hash(),
+        "config": dict(config),
+        "n": stats["n"],
+        "p50_ms": pct(stats["total"], 0.5),
+        "p99_ms": pct(stats["total"], 0.99),
+        "stages": {s: {"p50": pct(xs, 0.5), "p99": pct(xs, 0.99)}
+                   for s, xs in stats["stages"].items()},
+        "breakdown": {s: {"p50": pct(xs, 0.5), "p99": pct(xs, 0.99)}
+                      for s, xs in (stats.get("breakdown") or {}).items()},
+    }
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(row) + "\n")
+    return row
 
 
 def report(stats: dict, budget_ms: float) -> str:
@@ -165,6 +207,14 @@ def report(stats: dict, budget_ms: float) -> str:
         lines.append(f"{s:<10}{pct(xs, 0.5):>12.3f}{pct(xs, 0.99):>12.3f}")
     t = stats["total"]
     lines.append(f"{'total':<10}{pct(t, 0.5):>12.3f}{pct(t, 0.99):>12.3f}")
+    bd = stats.get("breakdown") or {}
+    if bd:
+        lines.append(f"{'breakdown':<10}{'p50 (ms)':>12}{'p99 (ms)':>12}")
+        for s in BREAKDOWN_KEYS:
+            xs = bd.get(s, [])
+            if xs:
+                lines.append(f"{s:<10}{pct(xs, 0.5):>12.3f}"
+                             f"{pct(xs, 0.99):>12.3f}")
     n_viol = len(stats["violations"])
     lines.append(f"waterfall integrity: "
                  f"{'FAIL ' + str(stats['violations'][:3]) if n_viol else 'OK'} "
@@ -201,6 +251,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="reranker query truncation (real reranker only)")
     ap.add_argument("--verbose", action="store_true",
                     help="per-10%% query progress + run wall time")
+    ap.add_argument("--ledger", default=None,
+                    help="append one JSON row per run to this file")
     a = ap.parse_args(argv)
 
     try:
@@ -239,6 +291,12 @@ def main(argv: list[str] | None = None) -> int:
 
     stats = run_latency(dag, queries, a.k, verbose=a.verbose)
     print(report(stats, a.budget_ms))
+    if a.ledger:
+        append_ledger(a.ledger, {"ann": a.ann, "embedder": a.embedder,
+                                 "reranker": a.reranker, "k": a.k,
+                                 "nprobe": a.nprobe,
+                                 "top_coarse": a.top_coarse,
+                                 "budget_ms": a.budget_ms}, stats)
     if stats["violations"]:
         return 2
     if pct(stats["total"], 0.5) > a.budget_ms:
