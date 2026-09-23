@@ -188,7 +188,14 @@ def stage_index(vecs_path: str, ids_path: str, docs_path: str, out: str,
 def stage_queries(docs_path: str, vecs_path: str, ids_path: str, nq: int,
                   queries_path: str = "q.jsonl", gt_path: str = "gt.jsonl",
                   force: bool = False, verbose: bool = False) -> dict:
-    """docs/vecs/ids -> gt.jsonl + q.jsonl (ground truth + gate queries)."""
+    """docs/vecs/ids -> q.jsonl + gt.jsonl (gate queries + ground truth).
+
+    ALIGNED by construction (M5 lesson, commit 1445aa0): q.jsonl is
+    written first from docs[:nq], then ground_truth --queries embeds
+    those exact texts — gt query k is always pred query k. The old
+    --nq random-vector path is never used here (different query sets
+    score recall@10 = 0.0000 by construction).
+    """
     import subprocess
     t0 = time.perf_counter()
     if _skip(queries_path, force) and _skip(gt_path, force):
@@ -196,13 +203,14 @@ def stage_queries(docs_path: str, vecs_path: str, ids_path: str, nq: int,
             print(f"[queries] reusing {queries_path} + {gt_path}",
                   flush=True)
         return {"reused": True}
-    subprocess.run([sys.executable, "scripts/ground_truth.py",
-                    "--vecs", vecs_path, "--ids", ids_path,
-                    "--nq", str(nq), "--out", gt_path], check=True)
     docs = [json.loads(l) for l in open(docs_path, encoding="utf-8")]
     with open(queries_path, "w") as f:
         for d in docs[:nq]:
             f.write(json.dumps({"query": d["text"][:200]}) + "\n")
+    subprocess.run([sys.executable, "scripts/ground_truth.py",
+                    "--vecs", vecs_path, "--ids", ids_path,
+                    "--queries", queries_path,
+                    "--out", gt_path], check=True)
     _log("queries", t0, f" ({nq} queries -> {queries_path}, {gt_path})")
     return {"nq": nq}
 

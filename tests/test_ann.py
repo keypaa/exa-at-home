@@ -191,6 +191,37 @@ def test_train_centroids_mini_run(tmp_path):
     assert c.shape == (4, 256) and c.dtype == np.float32
 
 
+def test_direct_coarse_recall_bounds_reversed_skew(tmp_path):
+    """M5 honesty pin (Tier-0 synth analogue): MockReranker reverses the
+    coarse top-10, so the cloud 0.0270 coarse-only number understates the
+    true direct-ANN top-10. Here: direct recall must exceed reversed
+    recall on the same index — the skew direction, pinned as regression."""
+    from ann_core import IvfIndex
+    vecs = make_vectors(2000, 256, seed=3)
+    ids = _write_ivf_index(tmp_path, vecs, k=64)
+    idx = IvfIndex.load(str(tmp_path))
+    pack = np.packbits((vecs > 0).astype(np.uint8), axis=1,
+                       bitorder="little")
+    bits = np.unpackbits(pack, axis=1,
+                         bitorder="little")[:, :256].astype(bool)
+    rng = np.random.default_rng(0)
+    direct, reversed_ = [], []
+    for i in rng.choice(len(vecs), size=50, replace=False):
+        q = vecs[i]
+        want = set(np.argsort(-np.where(bits, q, -q).sum(axis=1),
+                              kind="stable")[:10])
+        got, _ = idx.search(q, nprobe=8, top_k=50)
+        rows = [int(g[1:]) for g in got]  # "d123" -> 123 (ids are row-order)
+        direct.append(len(set(rows[:10]) & want) / 10)
+        # MockReranker reverses the full 50-candidate list: its top-10 is
+        # the coarse WORST 10 — the cloud 0.0270 skew, reproduced.
+        reversed_.append(len(set(rows[::-1][:10]) & want) / 10)
+    # Direct top-10 must beat worst-10 on average (else the corpus or the
+    # index is degenerate); direct must clear a sanity floor.
+    assert sum(direct) / len(direct) > sum(reversed_) / len(reversed_)
+    assert sum(direct) / len(direct) > 0.15  # sanity: funnel works on synth
+
+
 # --- Task 8 (M6-partial): inverted filter index + in-scan intersect ---
 
 FILTER_DOCS = [

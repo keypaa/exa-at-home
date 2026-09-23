@@ -58,11 +58,20 @@ cd crates/ann-core && cargo test -q && cd ../..   # Rust unit tests
 
 ## 1. Slice selection — top-N English-dense WET URLs
 
-Locked values: crawl `CC-MAIN-2026-34`; columnar path
-`https://data.commoncrawl.org/cc-index/table/cc-main/warc/crawl=CC-MAIN-2026-34/subset=warc/*.parquet`
-with `hive_partitioning=1`; SQL filters `subset=warc`, `fetch_status=200`,
-`content_mime_detected IN (text/html, application/xhtml+xml)`, eng-variant
-`content_languages` LIKEs; `GROUP BY warc_filename ORDER BY n_eng DESC`.
+Locked values: crawl `CC-MAIN-2026-34`; SQL filters `subset=warc`,
+`fetch_status=200`, `content_mime_detected IN (text/html,
+application/xhtml+xml)`, eng-variant `content_languages` LIKEs;
+`GROUP BY warc_filename ORDER BY n_eng DESC`.
+
+No HTTPS glob: CloudFront 404s on directory globs
+(`cc-index/table/.../*.parquet`), and S3 listing 403s — so the query
+reads an **explicit per-file URL list** (Common Crawl `duck.py`
+`cloudfront` algo): fetch `crawl-data/<crawl>/cc-index-table.paths.gz`
+(~2KB), keep `subset=warc` parts (300 files for `-34`), prefix
+`https://data.commoncrawl.org/`, pass the list to
+`duckdb.read_parquet(files, hive_partitioning=True)` with
+`SET http_retries = 100`. `scripts/select_slice.py` implements exactly
+this (verified 2026-09-23: 300 parts listed live).
 
 WARC→WET mapping: replace `/warc/` with `/wet/` in each segment path (sibling
 path; the full list is also published at
@@ -72,19 +81,13 @@ Slice sizes (researched, locked): **1M ≈ top-130 WET (~8GB)**;
 **5M ≈ top-620 WET (~38GB)**; toy = 4 WET (~10k docs).
 
 ```bash
-# toy slice (4 WET, ~10k docs)
-# NOTE (verified on-box 2026-09-14/15): the columnar-index HTTPS path 404s —
-# the cc-index/table prefix does not resolve over data.commoncrawl.org.
-# Until the correct layout is found, take WET files straight from wet.paths.gz
-# (no density ranking; fine for the toy — ingest dedups downstream):
-curl -s "https://data.commoncrawl.org/crawl-data/CC-MAIN-2026-34/wet.paths.gz" \
-    -o /tmp/wetpaths.gz --max-time 60 \
-  && zcat /tmp/wetpaths.gz | head -4 \
-  | sed 's|^|https://data.commoncrawl.org/|' > wet_urls.txt \
-  && cat wet_urls.txt
-# 1M slice (~130 WET, ~8GB) — BLOCKED on the columnar fix above; the toy
-# workaround generalizes (head -130) but without English-density ranking
-# you download ~2.5x more for the same English yield. Fix the layout first.
+# toy slice (4 WET, ~10k docs) — density-ranked via the columnar fix above
+python scripts/select_slice.py --crawl CC-MAIN-2026-34 --lang eng \
+    --limit-wet 4 --out wet_urls.txt && cat wet_urls.txt
+# (unranked fallback if DuckDB/HTTPS ever fails: first-N from wet.paths.gz,
+# no density ranking — ingest dedups downstream, fine for the toy only)
+# 1M slice (~130 WET, ~8GB) — density-ranked; unranked head -130 downloads
+# ~2.5x more for the same English yield.
 python scripts/select_slice.py --crawl CC-MAIN-2026-34 --lang eng \
     --limit-wet 130 --out wet_urls_1M.txt
 # 5M slice (~620 WET, ~38GB) — same blocker as 1M.
@@ -135,13 +138,15 @@ python -c "import json; seen=set(); out=open('docs.dedup.jsonl','w');
  for d in [json.loads(l)] if d['url'] not in seen]"
 mv docs.dedup.jsonl docs.jsonl && wc -l docs.jsonl   # toy: ~10k
 
-# 3b. embed bulk: docs.jsonl -> vecs.npy + ids.json (Arctic-m, native MRL-256)
+# 3b. embed bulk: docs.jsonl -> vecs.npy + ids.json (mxbai, MRL-256)
 python - <<'EOF'
 import json
 import numpy as np
 from exa_home.embed import Embedder
 docs = [json.loads(l) for l in open("docs.jsonl")]
-emb = Embedder()  # Snowflake/snowflake-arctic-embed-m-v2.0, truncate_dim=256
+emb = Embedder()  # mixedbread-ai/mxbai-embed-large-v1, truncate_dim=256
+# (Arctic-m-v2.0 was the spec pick; unloadable on-box — hard xformers
+# assert in its custom modeling file. mxbai is the locked replacement.)
 B = 256
 vecs = np.vstack([emb.encode_docs([d["text"][:12000] for d in docs[i:i+B]])
                   for i in range(0, len(docs), B)])
@@ -157,9 +162,9 @@ python scripts/build_index.py --vecs vecs.npy --ids ids.json \
     --centroids centroids.npy --docs docs.jsonl --out index/ --filter
 python -c "from exa_home.index_format import verify_manifest; print(verify_manifest('index/'))"
 
-# 3d. ground truth (200 queries) + query file for the gate
-python scripts/ground_truth.py --vecs vecs.npy --ids ids.json \
-    --nq 200 --out gt.jsonl
+# 3d. query file FIRST, then ground truth FOR those queries (aligned —
+# gt query k must be pred query k; the old --nq random-vector path scores
+# recall@10 = 0.0000 by construction, M5 lesson, commit 1445aa0)
 python - <<'EOF'
 import json
 docs = [json.loads(l) for l in open("docs.jsonl")]
@@ -167,10 +172,15 @@ with open("q.jsonl", "w") as f:   # Task 12 gate path: q.jsonl at root
     for d in docs[:200]:
         f.write(json.dumps({"query": d["text"][:200]}) + "\n")
 EOF
+python scripts/ground_truth.py --vecs vecs.npy --ids ids.json \
+    --queries q.jsonl --out gt.jsonl
 
-# 3e. validation gate (toy thresholds; full thresholds in §6)
+# 3e. validation gate (toy thresholds; full thresholds in §6).
+# --embedder arctic is kept as an alias for the real (mxbai) embedder.
 python scripts/e2e_latency.py --ann ivf --index index/ --queries q.jsonl \
-    --k 10 --budget-ms 100 --embedder arctic --reranker real
+    --k 10 --budget-ms 100 --embedder real --reranker real \
+    --top-coarse 50 --max-pair-tokens 64 --batch-size 32 \
+    --max-query-tokens 32 --ledger runs.jsonl
 python scripts/measure_recall.py --gt gt.jsonl --pred pred.jsonl
 ```
 
@@ -218,6 +228,8 @@ Produce them exactly — no flag relocates them:
 # q.jsonl: one {"query": ...} per line (200+ queries; see §3d for the toy cut,
 # use held-out head queries or the eval set for the full builds)
 # pred.jsonl: one {"query_id": k, "top10": [...]} per line from the serving stack
+# Reranker config must match the §3e gate (50/64tok/b32/32tok) so the recall
+# number corresponds to the latency number.
 python - <<'EOF'
 import json
 from exa_home.orch import build_search_dag, run_search
@@ -225,8 +237,10 @@ from exa_home.embed import Embedder
 from exa_home.rerank import Reranker
 from exa_home.store import ContentStore
 from ann_core import IvfIndex
-dag = build_search_dag(Embedder(), IvfIndex.load("index/"), Reranker(),
-                       ContentStore("index/store"))
+dag = build_search_dag(Embedder(), IvfIndex.load("index/"),
+                       Reranker(max_pair_tokens=64, batch_size=32,
+                                max_query_tokens=32),
+                       ContentStore("index/store"), top_coarse=50)
 queries = [json.loads(l)["query"] for l in open("q.jsonl")]
 with open("pred.jsonl", "w") as f:
     for k, q in enumerate(queries):
@@ -248,11 +262,15 @@ construction).
 
 ```bash
 # e2e 100ms gate — Task 12's exact hardcoded paths (index/ + q.jsonl at root)
+# (arctic is an alias for the real mxbai embedder; tuned reranker flags +
+# --ledger match §3e so the number lands in the run ledger)
 python scripts/e2e_latency.py --ann ivf --index index/ --queries q.jsonl \
-    --k 10 --budget-ms 100 --embedder arctic --reranker real
-# recall gate
+    --k 10 --budget-ms 100 --embedder real --reranker real \
+    --top-coarse 50 --max-pair-tokens 64 --batch-size 32 \
+    --max-query-tokens 32 --ledger runs.jsonl
+# recall gate — gt for the SAME q.jsonl (§5 pred recipe), never --nq randoms
 python scripts/ground_truth.py --vecs vecs.npy --ids ids.json \
-    --nq 1000 --out gt.jsonl
+    --queries q.jsonl --out gt.jsonl
 python scripts/measure_recall.py --gt gt.jsonl --pred pred.jsonl
 # Rust absolutes for the M2/M3 EXPERIMENTS.md rows
 cargo bench -p ann-core --bench search_bench   # run from repo root
@@ -260,11 +278,11 @@ cargo bench -p ann-core --bench search_bench   # run from repo root
 
 Deferred measurements — all funnel through this runbook; none can land sooner:
 
-- (pre) **Arctic doc-side prefix + trust_remote_code verifies**: confirm on
-  box whether `encode_docs` needs a doc-side prefix (queries use
-  `prompt_name="query"`) and whether the Arctic load proves out without
-  `trust_remote_code` (see `exa_home/embed.py`); land the verdict in
-  `EXPERIMENTS.md` before the full builds.
+- (pre) **mxbai doc-side prefix verify**: confirm on box whether
+  `encode_docs` needs a doc-side prefix (queries use
+  `prompt_name="query"`); land the verdict in `EXPERIMENTS.md` before
+  the full builds. (Arctic-m was the spec pick; superseded — unloadable,
+  xformers assert. No `trust_remote_code` with mxbai.)
 
 - (a) **Rerank <40ms** (`test_real_model_200_pairs_under_40ms`, cloud_only):
   needs CUDA + the ~90MB `cross-encoder/ms-marco-MiniLM-L6-v2` HF download.

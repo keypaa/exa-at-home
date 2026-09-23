@@ -115,14 +115,20 @@ def test_build_index_rejects_shape_mismatch(tmp_path):
 
 
 def test_select_slice_sql_locked_content():
-    """The researched SQL, verbatim: columnar path, hive partitioning,
-    all WHERE gates, GROUP-BY density rank."""
-    from scripts.select_slice import CRAWL, SQL, render_sql, warc_to_wet
+    """The researched SQL, verbatim: all WHERE gates, GROUP-BY density
+    rank. No HTTPS glob: CloudFront 404s on directory globs, so the
+    query reads an explicit per-file URL list (duck.py 'cloudfront'
+    algo) built from crawl-data/<crawl>/cc-index-table.paths.gz."""
+    from scripts.select_slice import CRAWL, PARTS_URL, render_sql, warc_to_wet
     assert CRAWL == "CC-MAIN-2026-34"
-    q = render_sql()
-    assert ("https://data.commoncrawl.org/cc-index/table/cc-main/warc/"
-            "crawl=CC-MAIN-2026-34/subset=warc/*.parquet") in q
-    assert "hive_partitioning=1" in q
+    assert PARTS_URL.format(crawl=CRAWL) == \
+        ("https://data.commoncrawl.org/crawl-data/CC-MAIN-2026-34/"
+         "cc-index-table.paths.gz")
+    files = ["https://data.commoncrawl.org/cc-index/table/cc-main/warc/"
+             "crawl=CC-MAIN-2026-34/subset=warc/part-00000-x.parquet"]
+    q = render_sql(files)
+    assert "*.parquet" not in q  # explicit list, never a glob
+    assert "part-00000-x.parquet" in q
     assert "subset = 'warc'" in q
     assert "fetch_status = 200" in q
     assert ("content_mime_detected IN "
@@ -132,7 +138,7 @@ def test_select_slice_sql_locked_content():
         assert like in q, like
     assert "GROUP BY warc_filename" in q
     assert "ORDER BY n_eng DESC" in q
-    assert render_sql(limit_wet=130).strip().endswith("LIMIT 130")
+    assert render_sql(files, limit_wet=130).strip().endswith("LIMIT 130")
     # /warc/ -> /wet/ sibling mapping; HTTPS prefix added by to_urls.
     assert warc_to_wet("crawl-data/CC-MAIN-2026-34/segments/123/warc/f.warc.gz") == \
         "crawl-data/CC-MAIN-2026-34/segments/123/wet/f.warc.gz"
@@ -141,6 +147,20 @@ def test_select_slice_sql_locked_content():
         ["https://data.commoncrawl.org/crawl-data/C/segments/1/wet/f.warc.gz"]
     with pytest.raises(ValueError):
         warc_to_wet("crawl-data/CC-MAIN-2026-34/wet.paths.gz")
+
+
+def test_select_slice_parts_filter_and_urls():
+    """cc-index-table.paths.gz -> subset=warc parts only -> HTTPS URLs."""
+    from scripts.select_slice import parts_to_urls
+    paths = ["cc-index/table/cc-main/warc/crawl=CC-MAIN-2026-34/",
+             "cc-index/table/cc-main/warc/crawl=CC-MAIN-2026-34/"
+             "subset=warc/part-00000-x.parquet",
+             "cc-index/table/cc-main/warc/crawl=CC-MAIN-2026-34/"
+             "subset=robotstxt/part-00000-y.parquet"]
+    urls = parts_to_urls(paths)
+    assert urls == ["https://data.commoncrawl.org/cc-index/table/cc-main/"
+                    "warc/crawl=CC-MAIN-2026-34/subset=warc/"
+                    "part-00000-x.parquet"]
 
 
 def test_download_skips_complete_files(tmp_path, monkeypatch):

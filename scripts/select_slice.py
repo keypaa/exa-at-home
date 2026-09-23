@@ -20,12 +20,19 @@ import argparse
 CRAWL = "CC-MAIN-2026-34"
 BASE = "https://data.commoncrawl.org"
 
-# Locked SQL (verbatim): rank WARC segments by English-doc density so the
-# slice needs only the densest files. eng-variant LIKEs are the language gate
-# (V1 is eng-only; --lang accepts nothing else).
+# Part-file listing: CloudFront 404s on directory globs
+# (cc-index/table/.../*.parquet), so the query reads an explicit per-file
+# URL list (Common Crawl duck.py 'cloudfront' algo) built from this file.
+PARTS_URL = ("https://data.commoncrawl.org/crawl-data/{crawl}/"
+             "cc-index-table.paths.gz")
+
+# Locked SQL (verbatim WHERE/GROUP BY): rank WARC segments by English-doc
+# density so the slice needs only the densest files. eng-variant LIKEs are
+# the language gate (V1 is eng-only; --lang accepts nothing else).
+# {files} is a SQL list literal of explicit HTTPS part URLs — never a glob.
 SQL = """
 SELECT warc_filename, COUNT(*) AS n_eng FROM read_parquet(
-  'https://data.commoncrawl.org/cc-index/table/cc-main/warc/crawl={crawl}/subset=warc/*.parquet',
+  [{files}],
   hive_partitioning=1)
 WHERE subset = 'warc'
   AND fetch_status = 200
@@ -40,8 +47,29 @@ LIMIT {lim}
 """
 
 
-def render_sql(crawl: str = CRAWL, limit_wet: int = 4) -> str:
-    return SQL.format(crawl=crawl, lim=limit_wet)
+def fetch_part_paths(crawl: str = CRAWL, timeout: int = 60) -> list[str]:
+    """Download cc-index-table.paths.gz (stdlib only) and keep subset=warc
+    parquet parts. ~2KB over HTTPS; the 300 × ~500MB parts themselves are
+    only ever read by DuckDB, never downloaded here."""
+    import gzip
+    import urllib.request
+    with urllib.request.urlopen(PARTS_URL.format(crawl=crawl),
+                                timeout=timeout) as r:
+        raw = r.read()
+    return [l for l in gzip.decompress(raw).decode("utf-8").splitlines()
+            if "/subset=warc/" in l and l.endswith(".parquet")]
+
+
+def parts_to_urls(paths: list[str]) -> list[str]:
+    """Part paths -> explicit HTTPS URLs (subset=warc parquet only)."""
+    return [f"{BASE}/{p}" for p in paths
+            if "/subset=warc/" in p and p.endswith(".parquet")]
+
+
+def render_sql(files: list[str], crawl: str = CRAWL,
+               limit_wet: int = 4) -> str:
+    lit = ", ".join(f"'{u}'" for u in files)
+    return SQL.format(files=lit, crawl=crawl, lim=limit_wet)
 
 
 def warc_to_wet(warc_filename: str) -> str:
@@ -63,10 +91,12 @@ def to_urls(rows: list[tuple]) -> list[str]:
 def main(crawl: str, limit_wet: int, out: str) -> list[str]:
     import duckdb  # cloud-only import: needs network + DuckDB HTTPS support
 
-    # Generic-HTTP globs need an explicit opt-in on current DuckDB versions.
+    urls = parts_to_urls(fetch_part_paths(crawl))
+    if not urls:
+        raise ValueError(f"{crawl}: no subset=warc parts in {PARTS_URL}")
     con = duckdb.connect()
-    con.execute("SET allow_asterisks_in_http_paths = true")
-    rows = con.execute(render_sql(crawl, limit_wet)).fetchall()
+    con.execute("SET http_retries = 100")
+    rows = con.execute(render_sql(urls, crawl, limit_wet)).fetchall()
     urls = to_urls(rows)
     with open(out, "w") as f:
         for u in urls:
