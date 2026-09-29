@@ -15,7 +15,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["maturin>=1.0"]
+dev = ["maturin>=1.0", "marimo>=0.25", "plotly>=5.0"]
 
 [build-system]
 requires = ["hatchling"]
