@@ -1,10 +1,14 @@
 """M5 latency gate — literate notebook (synth <-> toy rebuild).
 
+Self-contained: importing JUST this file is enough. The first cells
+bootstrap the repo (clone-if-missing) and check the environment, so a
+wiped box goes from empty workspace to running gate with no terminal.
+
 Run natively: `marimo edit notebooks/m5_gate.py` (needs `.[dev]` extras).
-On molab: the workspace is wiped between sessions, so this notebook assumes
-NOTHING persists. Open it from a fresh clone, pick a mode, run top to
-bottom — every stage rebuilds from the repo, every number comes from
-`import exa_home` library calls. No shell, no subprocess.
+On molab: open the file (mirror or import), run top to bottom — every
+stage rebuilds from the repo, every number comes from `import exa_home`
+library calls. Shell/subprocess appear ONLY in the bootstrap cell (setup,
+not compute).
 
 Modes:
 - `synth`: in-memory fakes (HashEmbedder + MockReranker). Seconds. Proves
@@ -22,7 +26,10 @@ app = marimo.App()
 @app.cell
 def _():
     import os
+    import subprocess
     import sys
+
+    REPO_URL = "https://github.com/keypaa/exa-at-home.git"
 
     def _has_markers(d):
         return os.path.isdir(os.path.join(d, "exa_home")) and \
@@ -85,6 +92,15 @@ def _():
         return cands[0]
 
     ROOT = _find_root()
+    if not _has_markers(ROOT):
+        # Only the notebook file came over (mirror/import a single file):
+        # fetch the library. Attended one-time setup — the only
+        # subprocess in the notebook; all compute stays in library calls.
+        dest = os.path.join(os.getcwd(), "exa-at-home")
+        print(f"repo not on box — cloning {REPO_URL}\n  -> {dest} ...")
+        subprocess.run(["git", "clone", "--depth", "1", REPO_URL, dest],
+                       check=True)
+        ROOT = dest
     for p in (ROOT, os.path.join(ROOT, "tests")):
         if p not in sys.path:
             sys.path.insert(0, p)
@@ -115,6 +131,34 @@ def _(ROOT, os):
         return os.path.join(ROOT, *parts)
 
     return R, e2e, go, json, mo, pipe, time
+
+
+@app.cell
+def _(R, mo):
+    import importlib.util
+
+    rows = []
+    for mod in ("torch", "sentence_transformers", "duckdb", "sklearn",
+                "pyroaring", "warcio", "plotly", "ann_core"):
+        rows.append((mod, "yes" if importlib.util.find_spec(mod) is not None else "MISSING"))
+    cuda = "n/a (no torch)"
+    try:
+        import torch
+
+        cuda = f"cuda={torch.cuda.is_available()}"
+    except Exception:
+        pass
+    status = "\n".join(f"| {m} | {s} |" for m, s in rows)
+    missing = [m for m, s in rows if s == "MISSING"]
+    advice = ""
+    if missing:
+        advice = ("\n**Missing**: " + ", ".join(missing) +
+                  " — in the box terminal: `pip install -e .[dev]` from the repo root" +
+                  ("; then `cd crates/ann-core && maturin develop`" if "ann_core" in missing else "") +
+                  " (RUNBOOK §0). Re-run this cell after.")
+    mo.md(f"## 0. Environment\n| module | importable |\n|---|---|\n{status}\n\ntorch: {cuda}"
+          f"\n\nRepo: `{R()}`" + advice)
+    return
 
 
 @app.cell
