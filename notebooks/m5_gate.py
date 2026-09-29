@@ -38,6 +38,10 @@ def _():
         __file__ (when real), plus one level DOWN from the CWD (mirrored
         workspaces often nest the repo, e.g. <workspace>/exa-at-home/).
         """
+        # NOTE: mirroring the notebook file alone is NOT enough — the
+        # library lives in the repo. Clone it once per session (terminal):
+        #   git clone https://github.com/keypaa/exa-at-home.git
+        # then this cell finds it below.
         cands = [os.getcwd()]
         try:
             f = __file__  # noqa: F821 — absent on some hosts
@@ -46,11 +50,27 @@ def _():
                     os.path.dirname(os.path.abspath(f))))
         except Exception:
             pass
+        seen = set()
+        queue = list(cands)
         try:
-            for child in sorted(os.listdir(cands[0])):
-                full = os.path.join(cands[0], child)
-                if os.path.isdir(full):
-                    cands.append(full)
+            while queue and len(seen) < 200:
+                base = queue.pop(0)
+                if base in seen:
+                    continue
+                seen.add(base)
+                if _has_markers(base):
+                    return base
+                try:
+                    kids = sorted(os.listdir(base))
+                except Exception:
+                    continue
+                cands.append(base)
+                for child in kids[:50]:
+                    full = os.path.join(base, child)
+                    if os.path.isdir(full) and full not in seen:
+                        if _has_markers(full):
+                            return full
+                        queue.append(full)
         except Exception:
             pass
         for base in cands:
@@ -68,10 +88,15 @@ def _():
     for p in (ROOT, os.path.join(ROOT, "tests")):
         if p not in sys.path:
             sys.path.insert(0, p)
+    try:
+        kids = sorted(os.listdir(os.getcwd()))[:20]
+    except Exception as e:
+        kids = [f"<unlistable: {e}>"]
     print(f"repo root: {ROOT} (markers: "
           f"{os.path.isdir(os.path.join(ROOT, 'exa_home'))} / "
           f"{os.path.isdir(os.path.join(ROOT, 'scripts'))})")
     print(f"cwd: {os.getcwd()}")
+    print(f"cwd contents: {kids}")
     return ROOT, os
 
 
