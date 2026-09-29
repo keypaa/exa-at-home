@@ -24,14 +24,19 @@ def _():
     import os
     import sys
 
+    def _has_markers(d):
+        return os.path.isdir(os.path.join(d, "exa_home")) and \
+            os.path.isdir(os.path.join(d, "scripts"))
+
     def _find_root():
         """Locate the repo root without trusting __file__.
 
         Mirrored/hosted marimo serves the notebook from a virtual path
         (e.g. marimo://notebook.py), so __file__-based anchoring resolves
-        to garbage and `import scripts` fails. Instead, walk upward from
-        the CWD (and __file__, when it is a real path) looking for the
-        repo markers (exa_home/ + scripts/).
+        to garbage and `import scripts` fails. Instead, look for the repo
+        markers (exa_home/ + scripts/): upward from the CWD and from
+        __file__ (when real), plus one level DOWN from the CWD (mirrored
+        workspaces often nest the repo, e.g. <workspace>/exa-at-home/).
         """
         cands = [os.getcwd()]
         try:
@@ -41,11 +46,17 @@ def _():
                     os.path.dirname(os.path.abspath(f))))
         except Exception:
             pass
+        try:
+            for child in sorted(os.listdir(cands[0])):
+                full = os.path.join(cands[0], child)
+                if os.path.isdir(full):
+                    cands.append(full)
+        except Exception:
+            pass
         for base in cands:
             d = base
             for _ in range(5):
-                if os.path.isdir(os.path.join(d, "exa_home")) and \
-                   os.path.isdir(os.path.join(d, "scripts")):
+                if _has_markers(d):
                     return d
                 parent = os.path.dirname(d)
                 if parent == d:
@@ -57,7 +68,10 @@ def _():
     for p in (ROOT, os.path.join(ROOT, "tests")):
         if p not in sys.path:
             sys.path.insert(0, p)
-    print(f"repo root: {ROOT}")
+    print(f"repo root: {ROOT} (markers: "
+          f"{os.path.isdir(os.path.join(ROOT, 'exa_home'))} / "
+          f"{os.path.isdir(os.path.join(ROOT, 'scripts'))})")
+    print(f"cwd: {os.getcwd()}")
     return ROOT, os
 
 
