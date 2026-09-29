@@ -156,8 +156,68 @@ def _(R, mo):
                   " — in the box terminal: `pip install -e .[dev]` from the repo root" +
                   ("; then `cd crates/ann-core && maturin develop`" if "ann_core" in missing else "") +
                   " (RUNBOOK §0). Re-run this cell after.")
-    mo.md(f"## 0. Environment\n| module | importable |\n|---|---|\n{status}\n\ntorch: {cuda}"
-          f"\n\nRepo: `{R()}`" + advice)
+    setup_btn = mo.ui.run_button(label="Run box setup (rust + deps + ann_core build)")
+    mo.vstack([mo.md(f"## 0. Environment\n| module | importable |\n|---|---|\n{status}\n\ntorch: {cuda}"
+          f"\n\nRepo: `{R()}`" + advice), setup_btn])
+    return (setup_btn,)
+
+
+@app.cell
+def _(R, mo, setup_btn):
+    def _do_setup():
+        """One-shot box setup: rust toolchain + repo deps + ann_core build.
+
+        Idempotent (every step checks first) and attended (runs only when
+        the button above is pressed). All imports stay inside the function
+        so the notebook namespace is untouched.
+        """
+        import os
+        import shutil
+        import subprocess
+        import sys
+
+        repo = R()
+        env = dict(os.environ)
+        if shutil.which("cargo") is None:
+            print("rust: no cargo — installing stable toolchain via rustup "
+                  "(minutes, attended) ...", flush=True)
+            subprocess.run(
+                "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs"
+                " | sh -s -- -y --default-toolchain stable --profile minimal",
+                shell=True, check=True)
+            cargo_bin = os.path.expanduser("~/.cargo/bin")
+            env["PATH"] = cargo_bin + os.pathsep + env.get("PATH", "")
+            os.environ["PATH"] = env["PATH"]
+        else:
+            print(f"rust: {shutil.which('cargo')}", flush=True)
+        if sys.version_info >= (3, 14):
+            env["PYO3_USE_ABI3_FORWARD_COMPATIBILITY"] = "1"
+            print("python >= 3.14: PyO3 forward-compat flag set", flush=True)
+        print("pip: installing repo + dev extras ...", flush=True)
+        subprocess.run(
+            [sys.executable, "-m", "pip", "install", "-q", "-e", ".[dev]"],
+            cwd=repo, env=env, check=True)
+        try:
+            import ann_core  # noqa: F401
+            print("ann_core: already importable", flush=True)
+        except ImportError:
+            print("rust: building ann_core (maturin develop, minutes) ...",
+                  flush=True)
+            subprocess.run(
+                [sys.executable, "-m", "maturin", "develop"],
+                cwd=os.path.join(repo, "crates", "ann-core"),
+                env=env, check=True)
+            print("ann_core: built", flush=True)
+        print("setup complete — re-run the §0 Environment cell, then continue below.")
+
+    if not setup_btn.value:
+        mo.md("Press **Run box setup** in the §0 cell above to install "
+              "missing pieces (rust + deps + `ann_core` build — one click, "
+              "attended, minutes). Already green? Just keep scrolling.")
+    else:
+        _do_setup()
+        mo.md("Setup ran — re-run the **§0 Environment** cell to confirm "
+              "everything reads `yes`, then continue below.")
     return
 
 
