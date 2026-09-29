@@ -24,10 +24,40 @@ def _():
     import os
     import sys
 
-    ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    def _find_root():
+        """Locate the repo root without trusting __file__.
+
+        Mirrored/hosted marimo serves the notebook from a virtual path
+        (e.g. marimo://notebook.py), so __file__-based anchoring resolves
+        to garbage and `import scripts` fails. Instead, walk upward from
+        the CWD (and __file__, when it is a real path) looking for the
+        repo markers (exa_home/ + scripts/).
+        """
+        cands = [os.getcwd()]
+        try:
+            f = __file__  # noqa: F821 — absent on some hosts
+            if isinstance(f, str) and os.path.sep in f:
+                cands.append(os.path.dirname(
+                    os.path.dirname(os.path.abspath(f))))
+        except Exception:
+            pass
+        for base in cands:
+            d = base
+            for _ in range(5):
+                if os.path.isdir(os.path.join(d, "exa_home")) and \
+                   os.path.isdir(os.path.join(d, "scripts")):
+                    return d
+                parent = os.path.dirname(d)
+                if parent == d:
+                    break
+                d = parent
+        return cands[0]
+
+    ROOT = _find_root()
     for p in (ROOT, os.path.join(ROOT, "tests")):
         if p not in sys.path:
             sys.path.insert(0, p)
+    print(f"repo root: {ROOT}")
     return ROOT, os
 
 
