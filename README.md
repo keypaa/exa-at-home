@@ -22,7 +22,7 @@ Common Crawl WET slice
       centroids.f32 / codes.bin / lists.bin / doc_ids.json
       filter/ (roaring domain/date/term bitmaps)
       store/  (content shards + offsets.json byte index)
-  → serve: embed → Rust IVF+L UT scan → top-50 → MiniLM-L6 rerank → top-10
+  → serve: embed → Rust IVF+LUT scan → top-50 → MiniLM-L6 rerank → top-10
   → home_search / home_contents (FastMCP)
 ```
 
