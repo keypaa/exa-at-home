@@ -427,6 +427,9 @@ def _(R, go, json, mo, mode, os):
         recs = [len(set(g["top10"]) & set(pr_by_id[g["query_id"]])) / 10
                 for g in gt_rows]
         recall = sum(recs) / len(recs)
+        # Print first: stdout always renders even if the figure below fails.
+        print(f"recall@10 = {recall:.4f} over {len(recs)} queries "
+              f"({recall / 0.027:.1f}x the coarse skew bound)")
         fig_rec = go.Figure()
         fig_rec.add_bar(x=["reranked top-10"], y=[recall], name="recall@10",
                         marker_color="#00CC96")
@@ -436,7 +439,7 @@ def _(R, go, json, mo, mode, os):
                               title=f"Recall@10 = {recall:.4f} over {len(recs)} queries",
                               yaxis_title="recall@10",
                               yaxis_range=[0, max(0.5, recall * 1.2)])
-        fig_rec
+        mo.vstack([mo.md(f"## Recall@10 = {recall:.4f}"), fig_rec])
     return
 
 
