@@ -10,6 +10,8 @@ rerank only.
 
 **Toy result (81k real Common Crawl pages, CC-MAIN-2026-34): p50 46.5ms vs
 the 100ms budget — PASS, with recall@10 = 0.2895 and a 10.7x rerank lift.**
+Independently reproduced from a wiped box through the notebook alone
+(2026-10-07): **p50 47.7ms PASS, recall@10 = 0.2885.**
 Details in [`EXPERIMENTS.md`](EXPERIMENTS.md).
 
 ## How it works
@@ -81,11 +83,15 @@ python scripts/measure_recall.py --gt gt.jsonl --pred pred.jsonl
 
 `notebooks/m5_gate.py` is the box entry point, built for hosted rules:
 markdown reasoning, library imports, Plotly waterfall/recall graphs, no
-background jobs. It self-bootstraps (clone-if-missing, one-click
-rust + deps + `ann_core` build) and assumes the workspace is wiped each
-session — all paths are repo-anchored, the run ledger goes to `runs.jsonl`
-**which you commit + push before leaving**. Mirror the repo → save a copy
-→ run top to bottom, `synth` first, then `toy`.
+background jobs. It self-bootstraps (clone-if-missing, environment status
+table, one-click rust + deps + `ann_core` build) and assumes the workspace
+is wiped each session — all paths are repo-anchored, every stage rebuilds
+in attended cells with progress ticks. Mirror the repo → save a copy →
+`synth` to prove the environment (seconds) → `toy` for the real rebuild
+(~30 min: 4 WET → 81k docs → gate + recall). Interactive knobs:
+`top_coarse` / `nprobe` sliders re-run the gate live. The run ledger goes
+to `runs.jsonl` — **commit it + `q/gt/pred.jsonl` and push before leaving**
+(small files; `index/` and vectors stay local).
 
 ## Key decisions
 
@@ -114,6 +120,7 @@ fails CI no matter how fast.
 - [x] M1–M5 + M6-partial on the 81k toy (46ms PASS, 0.29 recall)
 - [x] Store offset-index at build time, observability split, run ledger
 - [x] Columnar slice fix, RUNBOOK↔pipeline alignment, literate notebook
+- [x] Fresh-box reproduction via notebook alone (47.7ms PASS, 0.2885 recall)
 - [ ] 1M density-ranked build (top-130 WET, K=10k) + gate
 - [ ] Offset-index load path hardening at 1M scale, waterfall tolerance 10%+2ms
 - [ ] (Optional) answer/similar DAG nodes, Matryoshka fine-tune stretch
