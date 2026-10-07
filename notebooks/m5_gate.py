@@ -197,14 +197,31 @@ def _(R, mo, setup_btn):
         subprocess.run(
             [sys.executable, "-m", "pip", "install", "-q", "-e", ".[dev]"],
             cwd=repo, env=env, check=True)
+        # Belt-and-braces: extras don't always land (observed on a fresh
+        # uv-venv: maturin missing despite exit 0), so verify the load-
+        # bearing modules and fill gaps individually.
+        import importlib.util
+
+        for mod, pkg in (("pyroaring", "pyroaring>=0.4"),
+                         ("warcio", "warcio>=1.7"),
+                         ("maturin", "maturin>=1.0")):
+            if importlib.util.find_spec(mod) is None:
+                print(f"pip: {mod} missing after extras — installing {pkg} ...",
+                      flush=True)
+                subprocess.run(
+                    [sys.executable, "-m", "pip", "install", "-q", pkg],
+                    env=env, check=True)
         try:
             import ann_core  # noqa: F401
             print("ann_core: already importable", flush=True)
         except ImportError:
             print("rust: building ann_core (maturin develop, minutes) ...",
                   flush=True)
+            mat_bin = shutil.which("maturin")
+            cmd = [mat_bin, "develop"] if mat_bin else \
+                [sys.executable, "-m", "maturin", "develop"]
             subprocess.run(
-                [sys.executable, "-m", "maturin", "develop"],
+                cmd,
                 cwd=os.path.join(repo, "crates", "ann-core"),
                 env=env, check=True)
             print("ann_core: built", flush=True)
