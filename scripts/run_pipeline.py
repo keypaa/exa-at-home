@@ -20,6 +20,9 @@ import time
 WET_PATHS_URL = ("https://data.commoncrawl.org/crawl-data/{crawl}/"
                  "wet.paths.gz")
 BASE = "https://data.commoncrawl.org"
+# Absolute script path: stage subprocesses must not depend on the CWD
+# (notebook kernels run at the workspace root, not the repo).
+_HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 def _log(stage: str, t0: float, extra: str = "") -> None:
@@ -207,7 +210,7 @@ def stage_queries(docs_path: str, vecs_path: str, ids_path: str, nq: int,
     with open(queries_path, "w") as f:
         for d in docs[:nq]:
             f.write(json.dumps({"query": d["text"][:200]}) + "\n")
-    subprocess.run([sys.executable, "scripts/ground_truth.py",
+    subprocess.run([sys.executable, os.path.join(_HERE, "ground_truth.py"),
                     "--vecs", vecs_path, "--ids", ids_path,
                     "--queries", queries_path,
                     "--out", gt_path], check=True)
