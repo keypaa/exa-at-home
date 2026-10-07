@@ -175,10 +175,12 @@ def _git_hash() -> str:
         return "unknown"
 
 
-def append_ledger(path: str, config: dict, stats: dict) -> dict:
+def append_ledger(path: str, config: dict, stats: dict,
+                    recall: float | None = None) -> dict:
     """Append one JSON row per gate run (the EXPERIMENTS.md source).
 
-    Row: {ts, git, config, n, p50_ms, p99_ms, stages: {stage: {p50, p99}}}.
+    Row: {ts, git, config, n, p50_ms, p99_ms, stages, breakdown,
+    recall_at_10 (null when gt is unavailable, e.g. Tier-0 synth)}.
     Returns the row written.
     """
     import datetime
@@ -193,6 +195,7 @@ def append_ledger(path: str, config: dict, stats: dict) -> dict:
                    for s, xs in stats["stages"].items()},
         "breakdown": {s: {"p50": pct(xs, 0.5), "p99": pct(xs, 0.99)}
                       for s, xs in (stats.get("breakdown") or {}).items()},
+        "recall_at_10": recall,
     }
     with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps(row) + "\n")

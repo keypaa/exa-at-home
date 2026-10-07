@@ -387,12 +387,14 @@ def _(e2e, go, mo, stats):
 
 
 @app.cell
-def _(R, json, mo, mode, queries):
+def _(R, json, mo, mode, nprobe, queries, top_coarse):
     if mode.value == "synth":
         mo.md("Synth mode skips predictions by design — they need the box "
               "corpus and GPU models (toy mode runs this cell).")
     else:
         # Imports live INSIDE the branch: synth never touches GPU libs.
+        # Knobs follow the sliders (a hardcoded nprobe=8 here once
+        # measured one pred five times — M5c lesson, never again).
         from ann_core import IvfIndex
         from exa_home.embed import Embedder
         from exa_home.orch import build_search_dag, run_search
@@ -403,7 +405,8 @@ def _(R, json, mo, mode, queries):
                                     Reranker(max_pair_tokens=64, batch_size=32,
                                              max_query_tokens=32),
                                     ContentStore(R("index", "store")),
-                                    top_coarse=50)
+                                    top_coarse=top_coarse.value,
+                                    nprobe=nprobe.value)
         with open(R("pred.jsonl"), "w") as fout:
             for k, q in enumerate(queries):
                 res = run_search(dag_pred, q["query"], {}, top_k=10)
