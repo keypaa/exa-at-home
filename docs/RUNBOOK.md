@@ -16,8 +16,15 @@ commands in §6 produce exactly those (no overrides, no flags to relocate them).
 
 ## 0. Box setup — Rust, venv, binding (do these first, every fresh box)
 
+Shortcut (idempotent — run every fresh box, or press the notebook's
+setup button for the same steps from Python):
+
 ```bash
 git clone https://github.com/keypaa/exa-at-home.git && cd exa-at-home
+bash scripts/box_setup.sh
+```
+
+Manual equivalent (if the script ever fails, do these and tell the repo):
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 source "$HOME/.cargo/env" && cargo --version   # expect 1.9x
 python -m venv .venv && source .venv/bin/activate

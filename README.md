@@ -66,8 +66,9 @@ and never runs locally. The notebook's `synth` mode also runs anywhere:
 marimo edit notebooks/m5_gate.py
 ```
 
-**Cloud box (toy → gate, ~30 min attended):** follow
-[`docs/RUNBOOK.md`](docs/RUNBOOK.md) §§0–6, or stepwise through the
+**Cloud box (toy → gate, ~30 min attended):** terminal setup is one command
+(`bash scripts/box_setup.sh` — rust + deps + `ann_core`, idempotent), then
+follow [`docs/RUNBOOK.md`](docs/RUNBOOK.md) §§0–6, or stepwise through the
 notebook in `toy` mode. One-command equivalent:
 
 ```bash
