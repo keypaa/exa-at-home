@@ -11,11 +11,15 @@ jobs:
         with:
           python-version: "3.13"
       - uses: dtolnay/rust-toolchain@stable
-      - run: pip install -e ".[dev]"
-      - run: python -m maturin develop
+      - run: python -m venv .venv
+      - run: .venv/bin/pip install -e ".[dev]"
+      # Explicit .venv paths: shell activation does not persist across
+      # steps, and maturin requires a discoverable venv (.venv in cwd or
+      # any parent — repo root qualifies from crates/ann-core).
+      - run: .venv/bin/maturin develop
         working-directory: crates/ann-core
-      - run: ruff check exa_home/ scripts/ tests/ notebooks/
-      - run: ruff format --check exa_home/ scripts/ tests/ notebooks/
-      - run: python -m pytest tests/ -m "not cloud_only" -q
+      - run: .venv/bin/ruff check exa_home/ scripts/ tests/ notebooks/
+      - run: .venv/bin/ruff format --check exa_home/ scripts/ tests/ notebooks/
+      - run: .venv/bin/python -m pytest tests/ -m "not cloud_only" -q
       - run: cargo test -p ann-core
       - run: cargo fmt --check -p ann-core
