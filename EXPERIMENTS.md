@@ -1,6 +1,7 @@
 # Experiments (M1–M6 before/after)
 
 Every optimization lands as a measured before/after row (spec §9).
+Numbers live here; what they taught us lives in [`LEARNINGS.md`](LEARNINGS.md).
 
 Provenance: rows measured in this sandbox are marked **Tier-0** (numpy / fake
 backends, no model, no GPU); Rust criterion and GPU numbers are marked

@@ -12,7 +12,7 @@ rerank only.
 the 100ms budget — PASS, with recall@10 = 0.2895 and a 10.7x rerank lift.**
 Independently reproduced from a wiped box through the notebook alone
 (2026-10-07): **p50 47.7ms PASS, recall@10 = 0.2885.**
-Details in [`EXPERIMENTS.md`](EXPERIMENTS.md).
+Details in [`EXPERIMENTS.md`](EXPERIMENTS.md); judgment in [`LEARNINGS.md`](LEARNINGS.md).
 
 ## How it works
 
