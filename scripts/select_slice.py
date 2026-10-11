@@ -15,6 +15,7 @@ dedup happens in `exa_home.ingest.write_docs_jsonl` + the RUNBOOK URL pass;
 `robotstxt` / `crawldiagnostics` subsets and truncated records are dropped at
 ingest (`read_wet` only yields `conversion` records with decodable text).
 """
+
 import argparse
 
 CRAWL = "CC-MAIN-2026-34"
@@ -23,8 +24,7 @@ BASE = "https://data.commoncrawl.org"
 # Part-file listing: CloudFront 404s on directory globs
 # (cc-index/table/.../*.parquet), so the query reads an explicit per-file
 # URL list (Common Crawl duck.py 'cloudfront' algo) built from this file.
-PARTS_URL = ("https://data.commoncrawl.org/crawl-data/{crawl}/"
-             "cc-index-table.paths.gz")
+PARTS_URL = "https://data.commoncrawl.org/crawl-data/{crawl}/cc-index-table.paths.gz"
 
 # Locked SQL (verbatim WHERE/GROUP BY): rank WARC segments by English-doc
 # density so the slice needs only the densest files. eng-variant LIKEs are
@@ -53,21 +53,24 @@ def fetch_part_paths(crawl: str = CRAWL, timeout: int = 60) -> list[str]:
     only ever read by DuckDB, never downloaded here."""
     import gzip
     import urllib.request
-    with urllib.request.urlopen(PARTS_URL.format(crawl=crawl),
-                                timeout=timeout) as r:
+
+    with urllib.request.urlopen(PARTS_URL.format(crawl=crawl), timeout=timeout) as r:
         raw = r.read()
-    return [l for l in gzip.decompress(raw).decode("utf-8").splitlines()
-            if "/subset=warc/" in l and l.endswith(".parquet")]
+    return [
+        line
+        for line in gzip.decompress(raw).decode("utf-8").splitlines()
+        if "/subset=warc/" in line and line.endswith(".parquet")
+    ]
 
 
 def parts_to_urls(paths: list[str]) -> list[str]:
     """Part paths -> explicit HTTPS URLs (subset=warc parquet only)."""
-    return [f"{BASE}/{p}" for p in paths
-            if "/subset=warc/" in p and p.endswith(".parquet")]
+    return [
+        f"{BASE}/{p}" for p in paths if "/subset=warc/" in p and p.endswith(".parquet")
+    ]
 
 
-def render_sql(files: list[str], crawl: str = CRAWL,
-               limit_wet: int = 4) -> str:
+def render_sql(files: list[str], crawl: str = CRAWL, limit_wet: int = 4) -> str:
     lit = ", ".join(f"'{u}'" for u in files)
     return SQL.format(files=lit, crawl=crawl, lim=limit_wet)
 
@@ -108,8 +111,12 @@ def main(crawl: str, limit_wet: int, out: str) -> list[str]:
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--crawl", default=CRAWL)
-    ap.add_argument("--lang", default="eng", choices=["eng"],
-                    help="V1 is eng-only (locked); the SQL LIKEs are the gate.")
+    ap.add_argument(
+        "--lang",
+        default="eng",
+        choices=["eng"],
+        help="V1 is eng-only (locked); the SQL LIKEs are the gate.",
+    )
     ap.add_argument("--limit-wet", type=int, default=4)
     ap.add_argument("--out", default="wet_urls.txt")
     a = ap.parse_args()

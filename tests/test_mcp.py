@@ -6,13 +6,13 @@
 # mirror suite in tests/test_mcp_logic.py covers the same logic via a stub app.
 import pytest
 
-pytest.importorskip("fastmcp",
-                    reason="fastmcp not installed offline; on-box only")
+pytest.importorskip("fastmcp", reason="fastmcp not installed offline; on-box only")
 
 from exa_home.mcp_server import app, home_contents, home_search, wire
 
 
 # --- Stub backends (same method shapes as the real ones; cf. test_orch.py) ---
+
 
 class FakeEmbedder:
     def encode_queries(self, texts):
@@ -39,8 +39,7 @@ class FakeReranker:
     def rerank(self, query, candidates):
         if self.degraded:
             return list(candidates), True
-        ranked = sorted(candidates, key=lambda c: c["coarse_score"],
-                        reverse=True)
+        ranked = sorted(candidates, key=lambda c: c["coarse_score"], reverse=True)
         return [{**c, "score": c["coarse_score"] + 0.01} for c in ranked], False
 
 
@@ -53,17 +52,20 @@ class FakeStore:
 
 
 def _docs(n=3):
-    return {f"d{i}": {"id": f"d{i}",
-                      "url": f"https://example.com/{i}",
-                      "title": f"Title {i}",
-                      "text": f"passage {i} about neural search " * 20}
-            for i in range(n)}
+    return {
+        f"d{i}": {
+            "id": f"d{i}",
+            "url": f"https://example.com/{i}",
+            "title": f"Title {i}",
+            "text": f"passage {i} about neural search " * 20,
+        }
+        for i in range(n)
+    }
 
 
 def _wire(n=3, degraded=False):
     ann = FakeANN([f"d{i}" for i in range(n)])
-    wire(FakeEmbedder(), ann, FakeReranker(degraded=degraded),
-         FakeStore(_docs(n)))
+    wire(FakeEmbedder(), ann, FakeReranker(degraded=degraded), FakeStore(_docs(n)))
     return ann
 
 
@@ -76,8 +78,9 @@ def test_home_search_contract():
     res = home_search("neural search")
     assert set(res.keys()) >= {"results"}
     assert res["results"], "stub backends must yield non-empty results"
-    assert all(set(r) >= {"id", "url", "title", "snippet", "score"}
-               for r in res["results"])
+    assert all(
+        set(r) >= {"id", "url", "title", "snippet", "score"} for r in res["results"]
+    )
     assert all(isinstance(r["score"], float) for r in res["results"])
     assert res["degraded"] is False
 
@@ -120,7 +123,7 @@ def test_home_contents_paginates():
     assert len(res["items"]) <= 20 and "next_offset" in res
     assert res["remaining"] == len(ids) - 20
     # Caller pages with the offset — never silent truncation.
-    res2 = home_contents(ids[res["next_offset"]:])
+    res2 = home_contents(ids[res["next_offset"] :])
     assert len(res2["items"]) == len(ids) - 20
     assert "next_offset" not in res2
 

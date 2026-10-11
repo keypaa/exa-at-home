@@ -6,6 +6,7 @@ this sandbox (no maturin/PyPI), so the ANN backend is an injected numpy
 fake with the exact search() shape. The cloud_only real-budget test
 (--ann ivf, budget 100ms) runs on the cloud box later.
 """
+
 import subprocess
 import sys
 
@@ -19,10 +20,24 @@ SCRIPTS_E2E = "scripts/e2e_latency.py"
 
 def test_synth_e2e_exits_zero_with_generous_budget():
     r = subprocess.run(
-        [sys.executable, SCRIPTS_E2E, "--ann", "fake",
-         "--synth-docs", "500", "--synth-queries", "20",
-         "--k", "10", "--budget-ms", "5000"],
-        capture_output=True, text=True, timeout=300)
+        [
+            sys.executable,
+            SCRIPTS_E2E,
+            "--ann",
+            "fake",
+            "--synth-docs",
+            "500",
+            "--synth-queries",
+            "20",
+            "--k",
+            "10",
+            "--budget-ms",
+            "5000",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
     assert r.returncode == 0, f"stdout:\n{r.stdout}\nstderr:\n{r.stderr}"
     assert "waterfall integrity: OK" in r.stdout
     assert "total" in r.stdout and "p50 (ms)" in r.stdout
@@ -30,8 +45,7 @@ def test_synth_e2e_exits_zero_with_generous_budget():
 
 def test_synth_e2e_waterfall_and_shape_in_process():
     dag = build_synth_dag()
-    queries = [{"query": f"topic {i} neural search", "filters": {}}
-               for i in range(5)]
+    queries = [{"query": f"topic {i} neural search", "filters": {}} for i in range(5)]
     stats = run_latency(dag, queries, k=10)
     assert stats["violations"] == []
     assert len(stats["total"]) == 5
@@ -42,14 +56,15 @@ def test_synth_e2e_waterfall_and_shape_in_process():
 
 def test_ledger_appends_one_json_row_per_run(tmp_path):
     from scripts.e2e_latency import append_ledger, build_synth_dag, run_latency
+
     dag = build_synth_dag(n_docs=100, seed=1)
-    queries = [{"query": f"topic {i} neural search", "filters": {}}
-               for i in range(5)]
+    queries = [{"query": f"topic {i} neural search", "filters": {}} for i in range(5)]
     stats = run_latency(dag, queries, k=5)
     ledger = tmp_path / "runs.jsonl"
     append_ledger(str(ledger), {"ann": "fake", "n_docs": 100}, stats)
     import json
-    rows = [json.loads(l) for l in open(ledger, encoding="utf-8")]
+
+    rows = [json.loads(line) for line in open(ledger, encoding="utf-8")]
     assert len(rows) == 1
     row = rows[0]
     assert row["config"]["ann"] == "fake" and row["n"] == 5
@@ -58,10 +73,22 @@ def test_ledger_appends_one_json_row_per_run(tmp_path):
 
 def test_over_budget_exits_one():
     r = subprocess.run(
-        [sys.executable, SCRIPTS_E2E, "--ann", "fake",
-         "--synth-docs", "500", "--synth-queries", "5",
-         "--budget-ms", "0.000001"],
-        capture_output=True, text=True, timeout=300)
+        [
+            sys.executable,
+            SCRIPTS_E2E,
+            "--ann",
+            "fake",
+            "--synth-docs",
+            "500",
+            "--synth-queries",
+            "5",
+            "--budget-ms",
+            "0.000001",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
     assert r.returncode == 1, f"stdout:\n{r.stdout}\nstderr:\n{r.stderr}"
     assert "OVER BUDGET" in r.stdout
 
@@ -70,9 +97,26 @@ def test_over_budget_exits_one():
 def test_real_index_under_100ms_budget():
     """Cloud box: real IvfIndex + Arctic + reranker under the 100ms gate."""
     r = subprocess.run(
-        [sys.executable, SCRIPTS_E2E, "--ann", "ivf",
-         "--index", "index/", "--queries", "q.jsonl",
-         "--k", "10", "--budget-ms", "100",
-         "--embedder", "arctic", "--reranker", "real"],
-        capture_output=True, text=True, timeout=600)
+        [
+            sys.executable,
+            SCRIPTS_E2E,
+            "--ann",
+            "ivf",
+            "--index",
+            "index/",
+            "--queries",
+            "q.jsonl",
+            "--k",
+            "10",
+            "--budget-ms",
+            "100",
+            "--embedder",
+            "arctic",
+            "--reranker",
+            "real",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=600,
+    )
     assert r.returncode == 0, f"stdout:\n{r.stdout}\nstderr:\n{r.stderr}"

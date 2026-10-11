@@ -32,8 +32,9 @@ def _():
     REPO_URL = "https://github.com/keypaa/exa-at-home.git"
 
     def _has_markers(d):
-        return os.path.isdir(os.path.join(d, "exa_home")) and \
-            os.path.isdir(os.path.join(d, "scripts"))
+        return os.path.isdir(os.path.join(d, "exa_home")) and os.path.isdir(
+            os.path.join(d, "scripts")
+        )
 
     def _find_root():
         """Locate the repo root without trusting __file__.
@@ -53,8 +54,7 @@ def _():
         try:
             f = __file__  # noqa: F821 — absent on some hosts
             if isinstance(f, str) and os.path.sep in f:
-                cands.append(os.path.dirname(
-                    os.path.dirname(os.path.abspath(f))))
+                cands.append(os.path.dirname(os.path.dirname(os.path.abspath(f))))
         except Exception:
             pass
         seen = set()
@@ -98,8 +98,7 @@ def _():
         # subprocess in the notebook; all compute stays in library calls.
         dest = os.path.join(os.getcwd(), "exa-at-home")
         print(f"repo not on box — cloning {REPO_URL}\n  -> {dest} ...")
-        subprocess.run(["git", "clone", "--depth", "1", REPO_URL, dest],
-                       check=True)
+        subprocess.run(["git", "clone", "--depth", "1", REPO_URL, dest], check=True)
         ROOT = dest
     for p in (ROOT, os.path.join(ROOT, "tests")):
         if p not in sys.path:
@@ -108,9 +107,11 @@ def _():
         kids = sorted(os.listdir(os.getcwd()))[:20]
     except Exception as e:
         kids = [f"<unlistable: {e}>"]
-    print(f"repo root: {ROOT} (markers: "
-          f"{os.path.isdir(os.path.join(ROOT, 'exa_home'))} / "
-          f"{os.path.isdir(os.path.join(ROOT, 'scripts'))})")
+    print(
+        f"repo root: {ROOT} (markers: "
+        f"{os.path.isdir(os.path.join(ROOT, 'exa_home'))} / "
+        f"{os.path.isdir(os.path.join(ROOT, 'scripts'))})"
+    )
     print(f"cwd: {os.getcwd()}")
     print(f"cwd contents: {kids}")
     return ROOT, os
@@ -138,9 +139,19 @@ def _(R, mo):
     import importlib.util
 
     rows = []
-    for mod in ("torch", "sentence_transformers", "duckdb", "sklearn",
-                "pyroaring", "warcio", "plotly", "ann_core"):
-        rows.append((mod, "yes" if importlib.util.find_spec(mod) is not None else "MISSING"))
+    for mod in (
+        "torch",
+        "sentence_transformers",
+        "duckdb",
+        "sklearn",
+        "pyroaring",
+        "warcio",
+        "plotly",
+        "ann_core",
+    ):
+        rows.append(
+            (mod, "yes" if importlib.util.find_spec(mod) is not None else "MISSING")
+        )
     cuda = "n/a (no torch)"
     try:
         import torch
@@ -152,13 +163,27 @@ def _(R, mo):
     missing = [m for m, s in rows if s == "MISSING"]
     advice = ""
     if missing:
-        advice = ("\n**Missing**: " + ", ".join(missing) +
-                  " — in the box terminal: `pip install -e .[dev]` from the repo root" +
-                  ("; then `cd crates/ann-core && maturin develop`" if "ann_core" in missing else "") +
-                  " (RUNBOOK §0). Re-run this cell after.")
+        advice = (
+            "\n**Missing**: "
+            + ", ".join(missing)
+            + " — in the box terminal: `pip install -e .[dev]` from the repo root"
+            + (
+                "; then `cd crates/ann-core && maturin develop`"
+                if "ann_core" in missing
+                else ""
+            )
+            + " (RUNBOOK §0). Re-run this cell after."
+        )
     setup_btn = mo.ui.run_button(label="Run box setup (rust + deps + ann_core build)")
-    mo.vstack([mo.md(f"## 0. Environment\n| module | importable |\n|---|---|\n{status}\n\ntorch: {cuda}"
-          f"\n\nRepo: `{R()}`" + advice), setup_btn])
+    mo.vstack(
+        [
+            mo.md(
+                f"## 0. Environment\n| module | importable |\n|---|---|\n{status}\n\ntorch: {cuda}"
+                f"\n\nRepo: `{R()}`" + advice
+            ),
+            setup_btn,
+        ]
+    )
     return (setup_btn,)
 
 
@@ -179,12 +204,17 @@ def _(R, mo, setup_btn):
         repo = R()
         env = dict(os.environ)
         if shutil.which("cargo") is None:
-            print("rust: no cargo — installing stable toolchain via rustup "
-                  "(minutes, attended) ...", flush=True)
+            print(
+                "rust: no cargo — installing stable toolchain via rustup "
+                "(minutes, attended) ...",
+                flush=True,
+            )
             subprocess.run(
                 "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs"
                 " | sh -s -- -y --default-toolchain stable --profile minimal",
-                shell=True, check=True)
+                shell=True,
+                check=True,
+            )
             cargo_bin = os.path.expanduser("~/.cargo/bin")
             env["PATH"] = cargo_bin + os.pathsep + env.get("PATH", "")
             os.environ["PATH"] = env["PATH"]
@@ -196,45 +226,60 @@ def _(R, mo, setup_btn):
         print("pip: installing repo + dev extras ...", flush=True)
         subprocess.run(
             [sys.executable, "-m", "pip", "install", "-q", "-e", ".[dev]"],
-            cwd=repo, env=env, check=True)
+            cwd=repo,
+            env=env,
+            check=True,
+        )
         # Belt-and-braces: extras don't always land (observed on a fresh
         # uv-venv: maturin missing despite exit 0), so verify the load-
         # bearing modules and fill gaps individually.
         import importlib.util
 
-        for mod, pkg in (("pyroaring", "pyroaring>=0.4"),
-                         ("warcio", "warcio>=1.7"),
-                         ("maturin", "maturin>=1.0")):
+        for mod, pkg in (
+            ("pyroaring", "pyroaring>=0.4"),
+            ("warcio", "warcio>=1.7"),
+            ("maturin", "maturin>=1.0"),
+        ):
             if importlib.util.find_spec(mod) is None:
-                print(f"pip: {mod} missing after extras — installing {pkg} ...",
-                      flush=True)
+                print(
+                    f"pip: {mod} missing after extras — installing {pkg} ...",
+                    flush=True,
+                )
                 subprocess.run(
                     [sys.executable, "-m", "pip", "install", "-q", pkg],
-                    env=env, check=True)
+                    env=env,
+                    check=True,
+                )
         try:
             import ann_core  # noqa: F401
+
             print("ann_core: already importable", flush=True)
         except ImportError:
-            print("rust: building ann_core (maturin develop, minutes) ...",
-                  flush=True)
+            print("rust: building ann_core (maturin develop, minutes) ...", flush=True)
             mat_bin = shutil.which("maturin")
-            cmd = [mat_bin, "develop"] if mat_bin else \
-                [sys.executable, "-m", "maturin", "develop"]
+            cmd = (
+                [mat_bin, "develop"]
+                if mat_bin
+                else [sys.executable, "-m", "maturin", "develop"]
+            )
             subprocess.run(
-                cmd,
-                cwd=os.path.join(repo, "crates", "ann-core"),
-                env=env, check=True)
+                cmd, cwd=os.path.join(repo, "crates", "ann-core"), env=env, check=True
+            )
             print("ann_core: built", flush=True)
         print("setup complete — re-run the §0 Environment cell, then continue below.")
 
     if not setup_btn.value:
-        mo.md("Press **Run box setup** in the §0 cell above to install "
-              "missing pieces (rust + deps + `ann_core` build — one click, "
-              "attended, minutes). Already green? Just keep scrolling.")
+        mo.md(
+            "Press **Run box setup** in the §0 cell above to install "
+            "missing pieces (rust + deps + `ann_core` build — one click, "
+            "attended, minutes). Already green? Just keep scrolling."
+        )
     else:
         _do_setup()
-        mo.md("Setup ran — re-run the **§0 Environment** cell to confirm "
-              "everything reads `yes`, then continue below.")
+        mo.md(
+            "Setup ran — re-run the **§0 Environment** cell to confirm "
+            "everything reads `yes`, then continue below."
+        )
     return
 
 
@@ -282,8 +327,9 @@ def _(mo):
 @app.cell
 def _(R, mode, pipe):
     if mode.value == "toy":
-        slice_urls = pipe.stage_fetch("CC-MAIN-2026-34", 4, R("wet_urls.txt"),
-                                      verbose=True)
+        slice_urls = pipe.stage_fetch(
+            "CC-MAIN-2026-34", 4, R("wet_urls.txt"), verbose=True
+        )
         print(f"slice: {len(slice_urls)} URLs -> wet_urls.txt")
     else:
         print("synth: fetch skipped (no corpus needed)")
@@ -293,8 +339,9 @@ def _(R, mode, pipe):
 @app.cell
 def _(R, mode, pipe):
     if mode.value == "toy":
-        pipe.stage_download(R("wet_urls.txt"), R("data", "wet"),
-                            workers=16, verbose=True)
+        pipe.stage_download(
+            R("wet_urls.txt"), R("data", "wet"), workers=16, verbose=True
+        )
     print("download: done (or synth-skipped)")
     return
 
@@ -310,8 +357,14 @@ def _(R, mode, pipe):
 @app.cell
 def _(R, mode, pipe):
     if mode.value == "toy":
-        pipe.stage_embed(R("docs.jsonl"), R("vecs.npy"), R("ids.json"),
-                         batch=256, verbose=True, show_progress=True)
+        pipe.stage_embed(
+            R("docs.jsonl"),
+            R("vecs.npy"),
+            R("ids.json"),
+            batch=256,
+            verbose=True,
+            show_progress=True,
+        )
     print("embed: done (or synth-skipped)")
     return
 
@@ -319,25 +372,46 @@ def _(R, mode, pipe):
 @app.cell
 def _(R, e2e, mode, nprobe, pipe, top_coarse):
     if mode.value == "toy":
-        pipe.stage_index(R("vecs.npy"), R("ids.json"), R("docs.jsonl"),
-                         R("index"), k=1024, verbose=True)
-        pipe.stage_queries(R("docs.jsonl"), R("vecs.npy"), R("ids.json"),
-                           200, queries_path=R("q.jsonl"),
-                           gt_path=R("gt.jsonl"))
-        dag = e2e.build_real_dag(R("index"), None, "real", "real",
-                                 top_coarse=top_coarse.value,
-                                 nprobe=nprobe.value,
-                                 max_pair_tokens=64, batch_size=32,
-                                 max_query_tokens=32)
+        pipe.stage_index(
+            R("vecs.npy"),
+            R("ids.json"),
+            R("docs.jsonl"),
+            R("index"),
+            k=1024,
+            verbose=True,
+        )
+        pipe.stage_queries(
+            R("docs.jsonl"),
+            R("vecs.npy"),
+            R("ids.json"),
+            200,
+            queries_path=R("q.jsonl"),
+            gt_path=R("gt.jsonl"),
+        )
+        dag = e2e.build_real_dag(
+            R("index"),
+            None,
+            "real",
+            "real",
+            top_coarse=top_coarse.value,
+            nprobe=nprobe.value,
+            max_pair_tokens=64,
+            batch_size=32,
+            max_query_tokens=32,
+        )
         queries = e2e.load_queries(R("q.jsonl"))
-        print(f"toy ready: {len(queries)} queries, "
-              f"top_coarse={top_coarse.value}, nprobe={nprobe.value}")
+        print(
+            f"toy ready: {len(queries)} queries, "
+            f"top_coarse={top_coarse.value}, nprobe={nprobe.value}"
+        )
     else:
-        dag = e2e.build_synth_dag(n_docs=200, seed=0,
-                                  top_coarse=top_coarse.value,
-                                  nprobe=nprobe.value)
-        queries = [{"query": f"synthetic topic {i} about neural search",
-                    "filters": {}} for i in range(10)]
+        dag = e2e.build_synth_dag(
+            n_docs=200, seed=0, top_coarse=top_coarse.value, nprobe=nprobe.value
+        )
+        queries = [
+            {"query": f"synthetic topic {i} about neural search", "filters": {}}
+            for i in range(10)
+        ]
         print(f"synth ready: {len(queries)} queries")
     return dag, queries
 
@@ -346,9 +420,11 @@ def _(R, e2e, mode, nprobe, pipe, top_coarse):
 def _(dag, e2e, queries, time):
     gate_t0 = time.perf_counter()
     stats = e2e.run_latency(dag, queries, k=10, verbose=True)
-    print(f"gate: {stats['n']} queries in "
-          f"{time.perf_counter() - gate_t0:.1f}s, "
-          f"{len(stats['violations'])} waterfall violations")
+    print(
+        f"gate: {stats['n']} queries in "
+        f"{time.perf_counter() - gate_t0:.1f}s, "
+        f"{len(stats['violations'])} waterfall violations"
+    )
     return (stats,)
 
 
@@ -362,26 +438,36 @@ def _(e2e, go, mo, stats):
     def _p50(key):
         return e2e.pct(bd.get(key, [0.0]), 0.5)
 
-    fetch = [_p50("rerank_fetch_ms") if s == "rerank_ms"
-             else _p50("snippet_fetch_ms") if s == "snippet_ms"
-             else 0.0 for s in stages]
+    fetch = [
+        _p50("rerank_fetch_ms")
+        if s == "rerank_ms"
+        else _p50("snippet_fetch_ms")
+        if s == "snippet_ms"
+        else 0.0
+        for s in stages
+    ]
     compute = [p - f for p, f in zip(p50s, fetch)]
     p99s = [e2e.pct(stats["stages"][s], 0.99) for s in stages]
 
     fig_water = go.Figure()
-    fig_water.add_bar(x=stages, y=compute, name="compute",
-                      marker_color="#636EFA")
-    fig_water.add_bar(x=stages, y=fetch, name="store fetch",
-                      marker_color="#EF553B")
-    fig_water.update_layout(barmode="stack", template="plotly_white",
-                            title="M5 waterfall — p50 per stage (fetch vs compute)",
-                            xaxis_title="stage", yaxis_title="p50 ms")
+    fig_water.add_bar(x=stages, y=compute, name="compute", marker_color="#636EFA")
+    fig_water.add_bar(x=stages, y=fetch, name="store fetch", marker_color="#EF553B")
+    fig_water.update_layout(
+        barmode="stack",
+        template="plotly_white",
+        title="M5 waterfall — p50 per stage (fetch vs compute)",
+        xaxis_title="stage",
+        yaxis_title="p50 ms",
+    )
     fig_p99 = go.Figure()
     fig_p99.add_bar(x=stages, y=p50s, name="p50", marker_color="#636EFA")
     fig_p99.add_bar(x=stages, y=p99s, name="p99", marker_color="#AB63FA")
-    fig_p99.update_layout(template="plotly_white",
-                          title="p50 vs p99 per stage",
-                          xaxis_title="stage", yaxis_title="ms")
+    fig_p99.update_layout(
+        template="plotly_white",
+        title="p50 vs p99 per stage",
+        xaxis_title="stage",
+        yaxis_title="ms",
+    )
     mo.vstack([mo.md(f"```\n{table}\n```"), fig_water, fig_p99])
     return
 
@@ -389,8 +475,10 @@ def _(e2e, go, mo, stats):
 @app.cell
 def _(R, json, mo, mode, nprobe, queries, top_coarse):
     if mode.value == "synth":
-        mo.md("Synth mode skips predictions by design — they need the box "
-              "corpus and GPU models (toy mode runs this cell).")
+        mo.md(
+            "Synth mode skips predictions by design — they need the box "
+            "corpus and GPU models (toy mode runs this cell)."
+        )
     else:
         # Imports live INSIDE the branch: synth never touches GPU libs.
         # Knobs follow the sliders (a hardcoded nprobe=8 here once
@@ -401,16 +489,23 @@ def _(R, json, mo, mode, nprobe, queries, top_coarse):
         from exa_home.rerank import Reranker
         from exa_home.store import ContentStore
 
-        dag_pred = build_search_dag(Embedder(), IvfIndex.load(R("index")),
-                                    Reranker(max_pair_tokens=64, batch_size=32,
-                                             max_query_tokens=32),
-                                    ContentStore(R("index", "store")),
-                                    top_coarse=top_coarse.value,
-                                    nprobe=nprobe.value)
+        dag_pred = build_search_dag(
+            Embedder(),
+            IvfIndex.load(R("index")),
+            Reranker(max_pair_tokens=64, batch_size=32, max_query_tokens=32),
+            ContentStore(R("index", "store")),
+            top_coarse=top_coarse.value,
+            nprobe=nprobe.value,
+        )
         with open(R("pred.jsonl"), "w") as fout:
             for k, q in enumerate(queries):
                 res = run_search(dag_pred, q["query"], {}, top_k=10)
-                fout.write(json.dumps({"query_id": k, "top10": [r["id"] for r in res["results"]]}) + "\n")
+                fout.write(
+                    json.dumps(
+                        {"query_id": k, "top10": [r["id"] for r in res["results"]]}
+                    )
+                    + "\n"
+                )
                 if (k + 1) % 50 == 0:
                     print(f"pred: {k + 1}/{len(queries)}", flush=True)
         print(f"{len(queries)} predictions -> pred.jsonl")
@@ -420,28 +515,43 @@ def _(R, json, mo, mode, nprobe, queries, top_coarse):
 @app.cell
 def _(R, go, json, mo, mode, os):
     if mode.value == "synth" or not (
-            os.path.exists(R("gt.jsonl")) and os.path.exists(R("pred.jsonl"))):
-        mo.md("Recall graph appears in toy mode once `gt.jsonl` + `pred.jsonl` "
-              "exist (previous cells). Tier-0 stops the story at latency.")
+        os.path.exists(R("gt.jsonl")) and os.path.exists(R("pred.jsonl"))
+    ):
+        mo.md(
+            "Recall graph appears in toy mode once `gt.jsonl` + `pred.jsonl` "
+            "exist (previous cells). Tier-0 stops the story at latency."
+        )
     else:
         gt_rows = [json.loads(line) for line in open(R("gt.jsonl"), encoding="utf-8")]
-        pr_by_id = {json.loads(line)["query_id"]: json.loads(line)["top10"]
-                    for line in open(R("pred.jsonl"), encoding="utf-8")}
-        recs = [len(set(g["top10"]) & set(pr_by_id[g["query_id"]])) / 10
-                for g in gt_rows]
+        pr_by_id = {
+            json.loads(line)["query_id"]: json.loads(line)["top10"]
+            for line in open(R("pred.jsonl"), encoding="utf-8")
+        }
+        recs = [
+            len(set(g["top10"]) & set(pr_by_id[g["query_id"]])) / 10 for g in gt_rows
+        ]
         recall = sum(recs) / len(recs)
         # Print first: stdout always renders even if the figure below fails.
-        print(f"recall@10 = {recall:.4f} over {len(recs)} queries "
-              f"({recall / 0.027:.1f}x the coarse skew bound)")
+        print(
+            f"recall@10 = {recall:.4f} over {len(recs)} queries "
+            f"({recall / 0.027:.1f}x the coarse skew bound)"
+        )
         fig_rec = go.Figure()
-        fig_rec.add_bar(x=["reranked top-10"], y=[recall], name="recall@10",
-                        marker_color="#00CC96")
-        fig_rec.add_hline(y=0.027, line_dash="dash", line_color="red",
-                          annotation_text="coarse-only skew bound 0.027")
-        fig_rec.update_layout(template="plotly_white",
-                              title=f"Recall@10 = {recall:.4f} over {len(recs)} queries",
-                              yaxis_title="recall@10",
-                              yaxis_range=[0, max(0.5, recall * 1.2)])
+        fig_rec.add_bar(
+            x=["reranked top-10"], y=[recall], name="recall@10", marker_color="#00CC96"
+        )
+        fig_rec.add_hline(
+            y=0.027,
+            line_dash="dash",
+            line_color="red",
+            annotation_text="coarse-only skew bound 0.027",
+        )
+        fig_rec.update_layout(
+            template="plotly_white",
+            title=f"Recall@10 = {recall:.4f} over {len(recs)} queries",
+            yaxis_title="recall@10",
+            yaxis_range=[0, max(0.5, recall * 1.2)],
+        )
         mo.vstack([mo.md(f"## Recall@10 = {recall:.4f}"), fig_rec])
     return
 
@@ -453,17 +563,25 @@ def _(R, e2e, json, mo, mode, nprobe, os, stats, top_coarse):
     # Full knob config on every row (the pre-suite rows were ambiguous —
     # never again). Recall when pred+gt exist (toy, recall cell ran),
     # else None (synth stops at latency by design).
-    cfg = {"notebook": "m5_gate", "mode": mode.value,
-           "nprobe": nprobe.value, "top_coarse": top_coarse.value,
-           "n": stats["n"]}
+    cfg = {
+        "notebook": "m5_gate",
+        "mode": mode.value,
+        "nprobe": nprobe.value,
+        "top_coarse": top_coarse.value,
+        "n": stats["n"],
+    }
     verdict_recall = None
-    if mode.value == "toy" and os.path.exists(R("gt.jsonl")) and \
-            os.path.exists(R("pred.jsonl")):
+    if (
+        mode.value == "toy"
+        and os.path.exists(R("gt.jsonl"))
+        and os.path.exists(R("pred.jsonl"))
+    ):
         vgt = [json.loads(line) for line in open(R("gt.jsonl"), encoding="utf-8")]
-        vpr = {json.loads(line)["query_id"]: json.loads(line)["top10"]
-               for line in open(R("pred.jsonl"), encoding="utf-8")}
-        vrecs = [len(set(g["top10"]) & set(vpr[g["query_id"]])) / 10
-                 for g in vgt]
+        vpr = {
+            json.loads(line)["query_id"]: json.loads(line)["top10"]
+            for line in open(R("pred.jsonl"), encoding="utf-8")
+        }
+        vrecs = [len(set(g["top10"]) & set(vpr[g["query_id"]])) / 10 for g in vgt]
         verdict_recall = sum(vrecs) / len(vrecs)
     row = e2e.append_ledger(R("runs.jsonl"), cfg, stats, recall=verdict_recall)
     rec_txt = f", recall@{verdict_recall:.4f}" if verdict_recall is not None else ""

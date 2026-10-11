@@ -10,6 +10,7 @@ it only runs on the cloud box (maturin + GPU + HF download).
 Exit codes: 0 = pass; 1 = total p50 over budget; 2 = usage error or
 waterfall-integrity failure (profile stage-sum != wall).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -27,8 +28,7 @@ sys.path.insert(0, os.path.join(ROOT, "tests"))
 # is excluded from the waterfall sum — integrity check unchanged).
 STAGE_ORDER = ("embed_ms", "ann_ms", "rerank_ms", "snippet_ms")
 # M5b sub-spans: collected + reported + ledgered, never in the sum.
-BREAKDOWN_KEYS = ("filter_ms", "rerank_fetch_ms", "rerank_model_ms",
-                  "snippet_fetch_ms")
+BREAKDOWN_KEYS = ("filter_ms", "rerank_fetch_ms", "rerank_model_ms", "snippet_fetch_ms")
 
 
 def pct(xs, p):
@@ -75,8 +75,9 @@ class NumpyFakeANN:
         return [self.ids[i] for i in idx], [float(scores[i]) for i in idx]
 
 
-def build_synth_dag(n_docs: int = 500, seed: int = 0,
-                    top_coarse: int = 200, nprobe: int = 8):
+def build_synth_dag(
+    n_docs: int = 500, seed: int = 0, top_coarse: int = 200, nprobe: int = 8
+):
     """500-doc synth index from existing pieces: HashEmbedder + ContentStore
     + NumpyFakeANN + MockReranker, wired through build_search_dag."""
     from fixtures.synth import make_docs  # noqa: E402  (tests/ on sys.path)
@@ -93,14 +94,22 @@ def build_synth_dag(n_docs: int = 500, seed: int = 0,
     embedder = HashEmbedder(dim=256)
     mat = embedder.encode_docs([d["text"] for d in docs])
     ann = NumpyFakeANN([d["id"] for d in docs], mat)
-    return build_search_dag(embedder, ann, MockReranker(), store,
-                            top_coarse=top_coarse, nprobe=nprobe)
+    return build_search_dag(
+        embedder, ann, MockReranker(), store, top_coarse=top_coarse, nprobe=nprobe
+    )
 
 
-def build_real_dag(index_dir: str, store_dir: str | None, embedder_kind: str,
-                   reranker_kind: str, top_coarse: int, nprobe: int,
-                   max_pair_tokens: int = 160, batch_size: int = 128,
-                   max_query_tokens: int = 32):
+def build_real_dag(
+    index_dir: str,
+    store_dir: str | None,
+    embedder_kind: str,
+    reranker_kind: str,
+    top_coarse: int,
+    nprobe: int,
+    max_pair_tokens: int = 160,
+    batch_size: int = 128,
+    max_query_tokens: int = 32,
+):
     """Cloud-only path: IvfIndex over a built index/ dir. Lazy imports."""
     from exa_home.orch import build_search_dag
     from exa_home.store import ContentStore
@@ -109,23 +118,30 @@ def build_real_dag(index_dir: str, store_dir: str | None, embedder_kind: str,
 
     if embedder_kind in ("arctic", "real"):  # "arctic" kept as alias (pre-switch runs)
         from exa_home.embed import Embedder
+
         embedder = Embedder()
     else:
         from exa_home.embed import HashEmbedder
+
         embedder = HashEmbedder(dim=256)
     if reranker_kind == "real":
         from exa_home.rerank import Reranker
-        reranker = Reranker(max_pair_tokens=max_pair_tokens,
-                            batch_size=batch_size,
-                            max_query_tokens=max_query_tokens)
+
+        reranker = Reranker(
+            max_pair_tokens=max_pair_tokens,
+            batch_size=batch_size,
+            max_query_tokens=max_query_tokens,
+        )
     else:
         from exa_home.rerank import MockReranker
+
         reranker = MockReranker()
     ann = IvfIndex.load(index_dir)
     store = ContentStore(store_dir or os.path.join(index_dir, "store"))
 
-    return build_search_dag(embedder, ann, reranker, store,
-                            top_coarse=top_coarse, nprobe=nprobe)
+    return build_search_dag(
+        embedder, ann, reranker, store, top_coarse=top_coarse, nprobe=nprobe
+    )
 
 
 def run_latency(dag, queries: list[dict], k: int, verbose: bool = False) -> dict:
@@ -133,14 +149,14 @@ def run_latency(dag, queries: list[dict], k: int, verbose: bool = False) -> dict
     from exa_home.orch import run_search
 
     import time
+
     t_run = time.perf_counter()
     per_stage = {s: [] for s in STAGE_ORDER}
     breakdown: dict = {s: [] for s in BREAKDOWN_KEYS}
     totals: list[float] = []
     violations: list[tuple] = []
     for i, q in enumerate(queries):
-        res = run_search(dag, q["query"], q.get("filters"), top_k=k,
-                         profile=True)
+        res = run_search(dag, q["query"], q.get("filters"), top_k=k, profile=True)
         prof = res["profile"]
         wall = prof["total_ms"]
         stage_sum = sum(prof[s] for s in STAGE_ORDER)
@@ -154,29 +170,45 @@ def run_latency(dag, queries: list[dict], k: int, verbose: bool = False) -> dict
         totals.append(wall)
         if verbose and (i + 1) % max(1, len(queries) // 10) == 0:
             el = time.perf_counter() - t_run
-            print(f"e2e: query {i + 1}/{len(queries)} "
-                  f"(last total={wall:.0f}ms, degraded={res.get('degraded')}, "
-                  f"elapsed={el:.0f}s)", flush=True)
+            print(
+                f"e2e: query {i + 1}/{len(queries)} "
+                f"(last total={wall:.0f}ms, degraded={res.get('degraded')}, "
+                f"elapsed={el:.0f}s)",
+                flush=True,
+            )
     if verbose:
-        print(f"e2e: done {len(queries)} queries in "
-              f"{time.perf_counter() - t_run:.1f}s", flush=True)
-    return {"stages": per_stage, "breakdown": breakdown, "total": totals,
-            "violations": violations, "n": len(queries)}
+        print(
+            f"e2e: done {len(queries)} queries in {time.perf_counter() - t_run:.1f}s",
+            flush=True,
+        )
+    return {
+        "stages": per_stage,
+        "breakdown": breakdown,
+        "total": totals,
+        "violations": violations,
+        "n": len(queries),
+    }
 
 
 def _git_hash() -> str:
     try:
         import subprocess
-        r = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
-                           capture_output=True, text=True, timeout=10,
-                           cwd=ROOT)
+
+        r = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            cwd=ROOT,
+        )
         return r.stdout.strip() if r.returncode == 0 else "unknown"
     except Exception:
         return "unknown"
 
 
-def append_ledger(path: str, config: dict, stats: dict,
-                    recall: float | None = None) -> dict:
+def append_ledger(
+    path: str, config: dict, stats: dict, recall: float | None = None
+) -> dict:
     """Append one JSON row per gate run (the EXPERIMENTS.md source).
 
     Row: {ts, git, config, n, p50_ms, p99_ms, stages, breakdown,
@@ -184,6 +216,7 @@ def append_ledger(path: str, config: dict, stats: dict,
     Returns the row written.
     """
     import datetime
+
     row = {
         "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "git": _git_hash(),
@@ -191,10 +224,14 @@ def append_ledger(path: str, config: dict, stats: dict,
         "n": stats["n"],
         "p50_ms": pct(stats["total"], 0.5),
         "p99_ms": pct(stats["total"], 0.99),
-        "stages": {s: {"p50": pct(xs, 0.5), "p99": pct(xs, 0.99)}
-                   for s, xs in stats["stages"].items()},
-        "breakdown": {s: {"p50": pct(xs, 0.5), "p99": pct(xs, 0.99)}
-                      for s, xs in (stats.get("breakdown") or {}).items()},
+        "stages": {
+            s: {"p50": pct(xs, 0.5), "p99": pct(xs, 0.99)}
+            for s, xs in stats["stages"].items()
+        },
+        "breakdown": {
+            s: {"p50": pct(xs, 0.5), "p99": pct(xs, 0.99)}
+            for s, xs in (stats.get("breakdown") or {}).items()
+        },
         "recall_at_10": recall,
     }
     with open(path, "a", encoding="utf-8") as f:
@@ -216,28 +253,34 @@ def report(stats: dict, budget_ms: float) -> str:
         for s in BREAKDOWN_KEYS:
             xs = bd.get(s, [])
             if xs:
-                lines.append(f"{s:<10}{pct(xs, 0.5):>12.3f}"
-                             f"{pct(xs, 0.99):>12.3f}")
+                lines.append(f"{s:<10}{pct(xs, 0.5):>12.3f}{pct(xs, 0.99):>12.3f}")
     n_viol = len(stats["violations"])
-    lines.append(f"waterfall integrity: "
-                 f"{'FAIL ' + str(stats['violations'][:3]) if n_viol else 'OK'} "
-                 f"({n_viol} violations, tol 20%+5ms)")
-    lines.append(f"budget: total p50 {pct(t, 0.5):.3f}ms vs "
-                 f"{budget_ms:.1f}ms -> "
-                 f"{'OVER BUDGET' if pct(t, 0.5) > budget_ms else 'PASS'}")
+    lines.append(
+        f"waterfall integrity: "
+        f"{'FAIL ' + str(stats['violations'][:3]) if n_viol else 'OK'} "
+        f"({n_viol} violations, tol 20%+5ms)"
+    )
+    lines.append(
+        f"budget: total p50 {pct(t, 0.5):.3f}ms vs "
+        f"{budget_ms:.1f}ms -> "
+        f"{'OVER BUDGET' if pct(t, 0.5) > budget_ms else 'PASS'}"
+    )
     return "\n".join(lines)
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--ann", choices=["fake", "ivf"], default="fake")
-    ap.add_argument("--index", default=None,
-                    help="index/ dir (required for --ann ivf)")
-    ap.add_argument("--store", default=None,
-                    help="content store root (default <index>/store, ivf mode)")
+    ap.add_argument("--index", default=None, help="index/ dir (required for --ann ivf)")
+    ap.add_argument(
+        "--store",
+        default=None,
+        help="content store root (default <index>/store, ivf mode)",
+    )
     ap.add_argument("--queries", default=None, help="q.jsonl path")
-    ap.add_argument("--synth-queries", type=int, default=20,
-                    help="used when --queries is absent")
+    ap.add_argument(
+        "--synth-queries", type=int, default=20, help="used when --queries is absent"
+    )
     ap.add_argument("--synth-docs", type=int, default=500)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--k", type=int, default=10)
@@ -246,60 +289,93 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--reranker", choices=["mock", "real"], default="mock")
     ap.add_argument("--nprobe", type=int, default=8)
     ap.add_argument("--top-coarse", type=int, default=200)
-    ap.add_argument("--max-pair-tokens", type=int, default=160,
-                    help="reranker pair truncation (real reranker only)")
-    ap.add_argument("--batch-size", type=int, default=128,
-                    help="reranker batch size (real reranker only)")
-    ap.add_argument("--max-query-tokens", type=int, default=32,
-                    help="reranker query truncation (real reranker only)")
-    ap.add_argument("--verbose", action="store_true",
-                    help="per-10%% query progress + run wall time")
-    ap.add_argument("--ledger", default=None,
-                    help="append one JSON row per run to this file")
+    ap.add_argument(
+        "--max-pair-tokens",
+        type=int,
+        default=160,
+        help="reranker pair truncation (real reranker only)",
+    )
+    ap.add_argument(
+        "--batch-size",
+        type=int,
+        default=128,
+        help="reranker batch size (real reranker only)",
+    )
+    ap.add_argument(
+        "--max-query-tokens",
+        type=int,
+        default=32,
+        help="reranker query truncation (real reranker only)",
+    )
+    ap.add_argument(
+        "--verbose", action="store_true", help="per-10%% query progress + run wall time"
+    )
+    ap.add_argument(
+        "--ledger", default=None, help="append one JSON row per run to this file"
+    )
     a = ap.parse_args(argv)
 
     try:
         if a.queries:
             queries = load_queries(a.queries)
         else:
-            queries = [{"query": f"synthetic topic {i} about neural "
-                                 f"search {i % 7}", "filters": {}}
-                       for i in range(a.synth_queries)]
+            queries = [
+                {
+                    "query": f"synthetic topic {i} about neural search {i % 7}",
+                    "filters": {},
+                }
+                for i in range(a.synth_queries)
+            ]
     except (ValueError, OSError, json.JSONDecodeError) as e:
         print(f"e2e_latency: {e}", file=sys.stderr)
         return 2
     if not queries:
-        print("e2e_latency: no queries (--synth-queries must be >= 1 "
-              "without --queries)", file=sys.stderr)
+        print(
+            "e2e_latency: no queries (--synth-queries must be >= 1 without --queries)",
+            file=sys.stderr,
+        )
         return 2
 
     if a.ann == "fake":
-        dag = build_synth_dag(n_docs=a.synth_docs, seed=a.seed,
-                              top_coarse=a.top_coarse, nprobe=a.nprobe)
+        dag = build_synth_dag(
+            n_docs=a.synth_docs, seed=a.seed, top_coarse=a.top_coarse, nprobe=a.nprobe
+        )
     else:
         if not a.index:
-            print("e2e_latency: --index is required for --ann ivf",
-                  file=sys.stderr)
+            print("e2e_latency: --index is required for --ann ivf", file=sys.stderr)
             return 2
         try:
-            dag = build_real_dag(a.index, a.store, a.embedder, a.reranker,
-                                 a.top_coarse, a.nprobe,
-                                 max_pair_tokens=a.max_pair_tokens,
-                                 batch_size=a.batch_size,
-                                 max_query_tokens=a.max_query_tokens)
+            dag = build_real_dag(
+                a.index,
+                a.store,
+                a.embedder,
+                a.reranker,
+                a.top_coarse,
+                a.nprobe,
+                max_pair_tokens=a.max_pair_tokens,
+                batch_size=a.batch_size,
+                max_query_tokens=a.max_query_tokens,
+            )
         except ImportError as e:
-            print(f"e2e_latency: cloud-only backend unavailable: {e}",
-                  file=sys.stderr)
+            print(f"e2e_latency: cloud-only backend unavailable: {e}", file=sys.stderr)
             return 2
 
     stats = run_latency(dag, queries, a.k, verbose=a.verbose)
     print(report(stats, a.budget_ms))
     if a.ledger:
-        append_ledger(a.ledger, {"ann": a.ann, "embedder": a.embedder,
-                                 "reranker": a.reranker, "k": a.k,
-                                 "nprobe": a.nprobe,
-                                 "top_coarse": a.top_coarse,
-                                 "budget_ms": a.budget_ms}, stats)
+        append_ledger(
+            a.ledger,
+            {
+                "ann": a.ann,
+                "embedder": a.embedder,
+                "reranker": a.reranker,
+                "k": a.k,
+                "nprobe": a.nprobe,
+                "top_coarse": a.top_coarse,
+                "budget_ms": a.budget_ms,
+            },
+            stats,
+        )
     if stats["violations"]:
         return 2
     if pct(stats["total"], 0.5) > a.budget_ms:

@@ -4,8 +4,11 @@
 SCHEMA locks the on-disk layout (Task 6, M3); the Rust loader in
 crates/ann-core/src/index.rs implements to these same constants.
 """
+
 from __future__ import annotations
-import hashlib, json, os
+import hashlib
+import json
+import os
 
 MANIFEST = "manifest.json"
 CENTROIDS_FILE = "centroids.f32"
@@ -35,12 +38,15 @@ SCHEMA = {
         "doc_ids": DOC_IDS_FILE,
     },
     "centroids": {"dtype": "float32", "endian": "little", "shape": ["K", DIM]},
-    "codes": {"packing": "sign-bit", "bytes_per_row": CODE_BYTES,
-              "bitorder": "little"},
-    "lists": {"int": "u32", "endian": "little",
-              "layout": "u32 K, then per list: u32 len + len×u32 row ids"},
+    "codes": {"packing": "sign-bit", "bytes_per_row": CODE_BYTES, "bitorder": "little"},
+    "lists": {
+        "int": "u32",
+        "endian": "little",
+        "layout": "u32 K, then per list: u32 len + len×u32 row ids",
+    },
     "doc_ids": {"format": "json-list", "order": "row"},
 }
+
 
 def sha256(path: str) -> str:
     h = hashlib.sha256()
@@ -48,6 +54,7 @@ def sha256(path: str) -> str:
         for chunk in iter(lambda: f.read(1 << 20), b""):
             h.update(chunk)
     return h.hexdigest()
+
 
 def _manifest_entries(index_dir: str, prefix: str = "") -> dict:
     """sha256 of every file under index_dir, keyed by manifest-relative path.
@@ -73,8 +80,17 @@ def write_manifest(index_dir: str, meta: dict) -> None:
     has_filter = os.path.isdir(os.path.join(index_dir, "filter"))
     files = _manifest_entries(index_dir)
     with open(os.path.join(index_dir, MANIFEST), "w") as f:
-        json.dump({"version": SCHEMA_VERSION, "has_filter": has_filter,
-                   **meta, "files": files}, f, indent=2)
+        json.dump(
+            {
+                "version": SCHEMA_VERSION,
+                "has_filter": has_filter,
+                **meta,
+                "files": files,
+            },
+            f,
+            indent=2,
+        )
+
 
 def verify_manifest(index_dir: str) -> dict:
     with open(os.path.join(index_dir, MANIFEST)) as f:
@@ -87,5 +103,7 @@ def verify_manifest(index_dir: str) -> dict:
     for name, want in m["files"].items():
         got = sha256(os.path.join(index_dir, name))
         if got != want:
-            raise ValueError(f"corrupt index file {name}: want {want[:12]} got {got[:12]}")
+            raise ValueError(
+                f"corrupt index file {name}: want {want[:12]} got {got[:12]}"
+            )
     return m

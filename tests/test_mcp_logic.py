@@ -58,8 +58,7 @@ class FakeReranker:
     def rerank(self, query, candidates):
         if self.degraded:
             return list(candidates), True
-        ranked = sorted(candidates, key=lambda c: c["coarse_score"],
-                        reverse=True)
+        ranked = sorted(candidates, key=lambda c: c["coarse_score"], reverse=True)
         return [{**c, "score": c["coarse_score"] + 0.01} for c in ranked], False
 
 
@@ -72,17 +71,20 @@ class FakeStore:
 
 
 def _docs(n=3):
-    return {f"d{i}": {"id": f"d{i}",
-                      "url": f"https://example.com/{i}",
-                      "title": f"Title {i}",
-                      "text": f"passage {i} about neural search " * 20}
-            for i in range(n)}
+    return {
+        f"d{i}": {
+            "id": f"d{i}",
+            "url": f"https://example.com/{i}",
+            "title": f"Title {i}",
+            "text": f"passage {i} about neural search " * 20,
+        }
+        for i in range(n)
+    }
 
 
 def _wire(n=3, degraded=False):
     ann = FakeANN([f"d{i}" for i in range(n)])
-    wire(FakeEmbedder(), ann, FakeReranker(degraded=degraded),
-         FakeStore(_docs(n)))
+    wire(FakeEmbedder(), ann, FakeReranker(degraded=degraded), FakeStore(_docs(n)))
     return ann
 
 
@@ -92,10 +94,15 @@ def test_app_is_exa_home():
 
 def test_wire_stores_all_four_backends():
     from exa_home import mcp_server
+
     e, a, r, s = object(), object(), object(), object()
     wire(e, a, r, s)
-    assert (mcp_server._deps["embedder"], mcp_server._deps["ann"],
-            mcp_server._deps["reranker"], mcp_server._deps["store"]) == (e, a, r, s)
+    assert (
+        mcp_server._deps["embedder"],
+        mcp_server._deps["ann"],
+        mcp_server._deps["reranker"],
+        mcp_server._deps["store"],
+    ) == (e, a, r, s)
 
 
 def test_home_search_contract_with_enrichment():
@@ -103,8 +110,9 @@ def test_home_search_contract_with_enrichment():
     res = home_search("neural search")
     assert set(res.keys()) >= {"results"}
     assert res["results"]
-    assert all(set(r) >= {"id", "url", "title", "snippet", "score"}
-               for r in res["results"])
+    assert all(
+        set(r) >= {"id", "url", "title", "snippet", "score"} for r in res["results"]
+    )
     assert all(isinstance(r["score"], float) for r in res["results"])
     assert res["results"][0]["url"] == "https://example.com/0"
     assert res["results"][0]["title"] == "Title 0"
@@ -123,8 +131,12 @@ def test_home_search_forwards_rust_shape_filters():
     # Rust IvfIndex.search shapes: month_range is a tuple, allow is
     # Vec<u32>-equivalent (list[int] row ids). The FakeANN mirrors that.
     ann = _wire()
-    filters = {"terms": ["alpha"], "domains": ["example.com"],
-               "month_range": ("2026-01", "2026-08"), "allow": [0]}
+    filters = {
+        "terms": ["alpha"],
+        "domains": ["example.com"],
+        "month_range": ("2026-01", "2026-08"),
+        "allow": [0],
+    }
     res = home_search("q", filters=filters)
     assert ann.seen_kwargs and ann.seen_kwargs[0] == filters
     assert res["results"]
@@ -134,19 +146,26 @@ def test_home_search_translates_spec_shape_filters():
     # Spec §7 shape {date_range, keywords} maps through orch's translation
     # layer to Rust kwargs {month_range, terms} before ann.search.
     ann = _wire()
-    res = home_search("q", filters={"date_range": ("2026-01", "2026-08"),
-                                    "keywords": ["alpha"],
-                                    "domains": ["example.com"]})
+    res = home_search(
+        "q",
+        filters={
+            "date_range": ("2026-01", "2026-08"),
+            "keywords": ["alpha"],
+            "domains": ["example.com"],
+        },
+    )
     assert ann.seen_kwargs and ann.seen_kwargs[0] == {
         "month_range": ("2026-01", "2026-08"),
         "terms": ["alpha"],
-        "domains": ["example.com"]}
+        "domains": ["example.com"],
+    }
     assert res["results"]
 
 
 def test_home_search_rejects_unknown_filter_keys():
     from exa_home import orch
     import pytest as _pytest
+
     with _pytest.raises(ValueError, match="unknown filter key"):
         orch.translate_filters({"bogus": ["x"]})
 
@@ -154,8 +173,14 @@ def test_home_search_rejects_unknown_filter_keys():
 def test_home_search_arg_order_matches_orch_contract():
     import inspect
     from exa_home import orch
+
     assert list(inspect.signature(orch.run_search).parameters) == [
-        "dag", "query", "filters", "top_k", "profile"]
+        "dag",
+        "query",
+        "filters",
+        "top_k",
+        "profile",
+    ]
 
 
 def test_home_search_top_k_profile_and_degraded():
@@ -175,7 +200,7 @@ def test_home_contents_paginates_never_silent():
     res = home_contents(ids)
     assert len(res["items"]) == 20
     assert res["next_offset"] == 20 and res["remaining"] == 5
-    res2 = home_contents(ids[res["next_offset"]:])
+    res2 = home_contents(ids[res["next_offset"] :])
     assert len(res2["items"]) == 5
     assert "next_offset" not in res2
 

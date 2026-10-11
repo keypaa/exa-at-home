@@ -17,13 +17,16 @@ def wire(embedder=None, ann=None, reranker=None, store=None):
 
 
 @app.tool
-def home_search(query: str, filters: dict | None = None, top_k: int = 10,
-                profile: bool = False) -> dict:
+def home_search(
+    query: str, filters: dict | None = None, top_k: int = 10, profile: bool = False
+) -> dict:
     if not query or not query.strip():
         raise ValueError("query must be non-empty")
     from .orch import build_search_dag, run_search
-    dag = build_search_dag(_deps["embedder"], _deps["ann"],
-                           _deps["reranker"], _deps["store"])
+
+    dag = build_search_dag(
+        _deps["embedder"], _deps["ann"], _deps["reranker"], _deps["store"]
+    )
     # Exact Task 10 arg order; filters=None means {}. Spec-shaped filters
     # ({domains, date_range, keywords}) are translated to Rust kwargs in
     # orch.retrieve via translate_filters — never reinterpreted here.
@@ -34,8 +37,8 @@ def home_search(query: str, filters: dict | None = None, top_k: int = 10,
     for r in res.get("results", []):
         doc = _deps["store"].get(r["id"])
         item = dict(r)
-        item["url"] = (doc.get("url", "") if doc else "")
-        item["title"] = (doc.get("title", "") if doc else "")
+        item["url"] = doc.get("url", "") if doc else ""
+        item["title"] = doc.get("title", "") if doc else ""
         enriched.append(item)
     res["results"] = enriched
     return res
@@ -52,8 +55,14 @@ def home_contents(ids: list[str], max_chars_per_doc: int = 8000) -> dict:
         if d is None:
             items.append({"id": i, "error": "not_found"})
         else:
-            items.append({"id": i, "url": d["url"], "title": d.get("title", ""),
-                          "text": d["text"][:max_chars_per_doc]})
+            items.append(
+                {
+                    "id": i,
+                    "url": d["url"],
+                    "title": d.get("title", ""),
+                    "text": d["text"][:max_chars_per_doc],
+                }
+            )
     out = {"items": items}
     if rest:
         out["next_offset"] = len(page)

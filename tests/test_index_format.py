@@ -1,4 +1,5 @@
 """Tier 0: versioned index/ dir schema + manifest verify (Task 6 / M3)."""
+
 import json
 import struct
 
@@ -52,6 +53,7 @@ def test_manifest_verify_roundtrip(tmp_path):
 
 def test_manifest_verify_rejects_corruption(tmp_path):
     from exa_home.index_format import write_manifest, verify_manifest
+
     (tmp_path / "a.bin").write_bytes(b"hello")
     write_manifest(str(tmp_path), {"dim": 256})
     (tmp_path / "a.bin").write_bytes(b"evil!")

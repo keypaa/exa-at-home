@@ -8,3 +8,10 @@ __pycache__/
 .pytest_cache/
 *.pyc
 Cargo.lock
+.agents/
+
+# local tool droppings (session caches, editor state — never commit)
+.jspace/
+notebooks/__marimo__/
+skills-lock.json
+zenno/audit/

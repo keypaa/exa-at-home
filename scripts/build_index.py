@@ -24,6 +24,7 @@ pre-trained centroids.
 Centroid assignment runs in row chunks so the 5M-doc full build never
 materializes the n×K score matrix.
 """
+
 import argparse
 import json
 import os
@@ -50,14 +51,27 @@ def assign(vecs, centroids, verbose: bool = False):
     return out
 
 
-def main(vecs_path: str, ids_path: str, centroids_path: str, docs_path: str,
-         out: str, store: str | None = None, no_store: bool = False,
-         filter: bool = False, max_terms: int = 50_000,
-         crawl: str = "CC-MAIN-2026-34", verbose: bool = False) -> dict:
+def main(
+    vecs_path: str,
+    ids_path: str,
+    centroids_path: str,
+    docs_path: str,
+    out: str,
+    store: str | None = None,
+    no_store: bool = False,
+    filter: bool = False,
+    max_terms: int = 50_000,
+    crawl: str = "CC-MAIN-2026-34",
+    verbose: bool = False,
+) -> dict:
     import numpy as np
 
     from exa_home.index_format import (
-        CENTROIDS_FILE, CODES_FILE, DIM, DOC_IDS_FILE, LISTS_FILE,
+        CENTROIDS_FILE,
+        CODES_FILE,
+        DIM,
+        DOC_IDS_FILE,
+        LISTS_FILE,
         write_manifest,
     )
 
@@ -127,8 +141,7 @@ def main(vecs_path: str, ids_path: str, centroids_path: str, docs_path: str,
         build_filter(docs, os.path.join(out, "filter"), max_terms)
 
     # Manifest LAST so filter/ + store shards are covered by verify.
-    write_manifest(out, {"dim": DIM, "n_docs": n, "n_centroids": k,
-                         "crawl": crawl})
+    write_manifest(out, {"dim": DIM, "n_docs": n, "n_centroids": k, "crawl": crawl})
     print(f"index {n} docs, K={k} -> {out} (stored {n_stored}, filter={filter})")
     return {"n_docs": n, "n_centroids": k, "n_stored": n_stored}
 
@@ -140,15 +153,33 @@ if __name__ == "__main__":
     ap.add_argument("--centroids", required=True)
     ap.add_argument("--docs", required=True)
     ap.add_argument("--out", required=True)
-    ap.add_argument("--store", default=None,
-                    help="content store root (default <out>/store)")
+    ap.add_argument(
+        "--store", default=None, help="content store root (default <out>/store)"
+    )
     ap.add_argument("--no-store", action="store_true")
-    ap.add_argument("--filter", action="store_true",
-                    help="also build index/filter/ (needs pyroaring)")
+    ap.add_argument(
+        "--filter",
+        action="store_true",
+        help="also build index/filter/ (needs pyroaring)",
+    )
     ap.add_argument("--max-terms", type=int, default=50_000)
     ap.add_argument("--crawl", default="CC-MAIN-2026-34")
-    ap.add_argument("--verbose", action="store_true",
-                    help="progress output (assign/store/lists stages)")
+    ap.add_argument(
+        "--verbose",
+        action="store_true",
+        help="progress output (assign/store/lists stages)",
+    )
     a = ap.parse_args()
-    main(a.vecs, a.ids, a.centroids, a.docs, a.out, a.store, a.no_store,
-         a.filter, a.max_terms, a.crawl, verbose=a.verbose)
+    main(
+        a.vecs,
+        a.ids,
+        a.centroids,
+        a.docs,
+        a.out,
+        a.store,
+        a.no_store,
+        a.filter,
+        a.max_terms,
+        a.crawl,
+        verbose=a.verbose,
+    )

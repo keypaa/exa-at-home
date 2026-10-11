@@ -33,12 +33,15 @@ def _conversion_texts(path: str) -> list[bytes]:
                 if line.lower().startswith("content-length:"):
                     clen = int(line.split(":", 1)[1].strip())
             if is_conv:
-                texts.append(raw[hend + 4:hend + 4 + clen])
+                texts.append(raw[hend + 4 : hend + 4 + clen])
             pos = hend + 4 + clen
         return texts
     with open(path, "rb") as f:
-        return [r.content_stream().read() for r in ArchiveIterator(f)
-                if r.rec_type == "conversion"]
+        return [
+            r.content_stream().read()
+            for r in ArchiveIterator(f)
+            if r.rec_type == "conversion"
+        ]
 
 
 def test_synth_vectors_are_normalized():

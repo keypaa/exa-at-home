@@ -1,12 +1,16 @@
 # exa_home/store.py
 from __future__ import annotations
-import hashlib, json, os
+import hashlib
+import json
+import os
 from collections import OrderedDict
 
 OFFSETS_FILENAME = "offsets.json"
 
+
 class ContentStore:
     """Disk shards + small RAM LRU. Serves the home_contents path."""
+
     def __init__(self, root: str, lru_size: int = 10_000):
         self.root = root
         os.makedirs(root, exist_ok=True)
@@ -26,7 +30,10 @@ class ContentStore:
         self._index: dict[str, tuple[str, int]] | None = None
 
     def _shard(self, doc_id: str) -> str:
-        return os.path.join(self.root, f"shard-{int(hashlib.sha1(doc_id.encode()).hexdigest()[:8], 16) % 64}.jsonl")
+        return os.path.join(
+            self.root,
+            f"shard-{int(hashlib.sha1(doc_id.encode()).hexdigest()[:8], 16) % 64}.jsonl",
+        )
 
     def begin_bulk(self) -> None:
         """Enable offset tracking for a bulk load (build_index path).
@@ -61,8 +68,10 @@ class ContentStore:
         self._ensure_index()
         assert self._index is not None
         out_path = os.path.join(self.root, OFFSETS_FILENAME)
-        serial = {doc_id: [os.path.basename(p), off]
-                  for doc_id, (p, off) in self._index.items()}
+        serial = {
+            doc_id: [os.path.basename(p), off]
+            for doc_id, (p, off) in self._index.items()
+        }
         with open(out_path, "w", encoding="utf-8") as f:
             json.dump(serial, f)
         return out_path

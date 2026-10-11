@@ -26,6 +26,7 @@ Usage (Tier-0):
     python scripts/sweep.py --synth-docs 50 --synth-queries 3 \\
         --nprobe 1 2 --top-coarse 10 20 --out /tmp/s
 """
+
 from __future__ import annotations
 
 import argparse
@@ -43,6 +44,7 @@ sys.path.insert(0, os.path.join(ROOT, "tests"))
 
 def _timestamp() -> str:
     import datetime
+
     return datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 
 
@@ -71,14 +73,18 @@ def build_synth_backends(n_docs: int = 200, seed: int = 0) -> dict:
     embedder = HashEmbedder(dim=256)
     mat = embedder.encode_docs([d["text"] for d in docs])
     ann = NumpyFakeANN([d["id"] for d in docs], mat)
-    return {"embedder": embedder, "ann": ann,
-            "reranker": MockReranker(),
-            "reranker_factory": lambda pt, b: MockReranker(),
-            "store": store}
+    return {
+        "embedder": embedder,
+        "ann": ann,
+        "reranker": MockReranker(),
+        "reranker_factory": lambda pt, b: MockReranker(),
+        "store": store,
+    }
 
 
-def build_real_backends(index_dir: str, store_dir: str | None,
-                        max_query_tokens: int = 32) -> dict:
+def build_real_backends(
+    index_dir: str, store_dir: str | None, max_query_tokens: int = 32
+) -> dict:
     """Cloud-only backends. Lazy imports: ann_core + models need the box.
 
     The reranker arrives as a FACTORY (cached per combo in run_grid):
@@ -92,15 +98,19 @@ def build_real_backends(index_dir: str, store_dir: str | None,
     from ann_core import IvfIndex  # noqa: E402 (maturin develop on-box)
 
     def _factory(max_pair_tokens: int, batch_size: int) -> Reranker:
-        return Reranker(max_pair_tokens=max_pair_tokens,
-                        batch_size=batch_size,
-                        max_query_tokens=max_query_tokens)
+        return Reranker(
+            max_pair_tokens=max_pair_tokens,
+            batch_size=batch_size,
+            max_query_tokens=max_query_tokens,
+        )
 
-    return {"embedder": Embedder(),
-            "ann": IvfIndex.load(index_dir),
-            "reranker": _factory(64, 32),
-            "reranker_factory": _factory,
-            "store": ContentStore(store_dir or os.path.join(index_dir, "store"))}
+    return {
+        "embedder": Embedder(),
+        "ann": IvfIndex.load(index_dir),
+        "reranker": _factory(64, 32),
+        "reranker_factory": _factory,
+        "store": ContentStore(store_dir or os.path.join(index_dir, "store")),
+    }
 
 
 def _recall_at_10(gt_rows: list[dict], pred_rows: list[dict]) -> float:
@@ -109,13 +119,20 @@ def _recall_at_10(gt_rows: list[dict], pred_rows: list[dict]) -> float:
     return sum(recs) / len(recs)
 
 
-def run_grid(backends: dict, queries: list[dict],
-             gt_rows: list[dict] | None,
-             nprobes: list[int], top_coarses: list[int], k: int,
-             out_dir: str, ledger_path: str, budget_ms: float,
-             logger: logging.Logger | None = None,
-             pair_tokens_list: list[int] | None = None,
-             batch_sizes: list[int] | None = None) -> list[dict]:
+def run_grid(
+    backends: dict,
+    queries: list[dict],
+    gt_rows: list[dict] | None,
+    nprobes: list[int],
+    top_coarses: list[int],
+    k: int,
+    out_dir: str,
+    ledger_path: str,
+    budget_ms: float,
+    logger: logging.Logger | None = None,
+    pair_tokens_list: list[int] | None = None,
+    batch_sizes: list[int] | None = None,
+) -> list[dict]:
     """Run the full grid. Returns the ledger rows (also appended to file)."""
     from exa_home.orch import build_search_dag, run_search
     from scripts.e2e_latency import append_ledger, pct, run_latency
@@ -127,53 +144,78 @@ def run_grid(backends: dict, queries: list[dict],
     log = logger
     # run_grid always owns its file log (idempotent: one handler per path).
     want = os.path.join(out_dir, "sweep.log")
-    if not any(isinstance(h, logging.FileHandler) and
-               getattr(h, "baseFilename", "") == want
-               for h in log.handlers):
+    if not any(
+        isinstance(h, logging.FileHandler) and getattr(h, "baseFilename", "") == want
+        for h in log.handlers
+    ):
         fmt = logging.Formatter("%(asctime)s %(message)s", datefmt="%H:%M:%S")
         fh = logging.FileHandler(want)
         fh.setFormatter(fmt)
         log.addHandler(fh)
     pair_tokens_list = pair_tokens_list or [64]
     batch_sizes = batch_sizes or [32]
-    combos = [{"nprobe": np, "top_coarse": tc,
-               "max_pair_tokens": pt, "batch_size": b}
-              for np in nprobes for tc in top_coarses
-              for pt in pair_tokens_list for b in batch_sizes]
+    combos = [
+        {"nprobe": np, "top_coarse": tc, "max_pair_tokens": pt, "batch_size": b}
+        for np in nprobes
+        for tc in top_coarses
+        for pt in pair_tokens_list
+        for b in batch_sizes
+    ]
     with open(os.path.join(out_dir, "grid.json"), "w") as f:
-        json.dump({"combos": combos, "k": k, "budget_ms": budget_ms,
-                   "n_queries": len(queries)}, f, indent=2)
-    factory = backends.get("reranker_factory",
-                           lambda pt, b: backends["reranker"])
+        json.dump(
+            {
+                "combos": combos,
+                "k": k,
+                "budget_ms": budget_ms,
+                "n_queries": len(queries),
+            },
+            f,
+            indent=2,
+        )
+    factory = backends.get("reranker_factory", lambda pt, b: backends["reranker"])
     rr_cache: dict = {}
     rows = []
     for c in combos:
-        slug = (f"np{c['nprobe']}_tc{c['top_coarse']}"
-                f"_pt{c['max_pair_tokens']}_b{c['batch_size']}")
+        slug = (
+            f"np{c['nprobe']}_tc{c['top_coarse']}"
+            f"_pt{c['max_pair_tokens']}_b{c['batch_size']}"
+        )
         key = (c["max_pair_tokens"], c["batch_size"])
         if key not in rr_cache:
             rr_cache[key] = factory(*key)
-        dag = build_search_dag(backends["embedder"], backends["ann"],
-                               rr_cache[key], backends["store"],
-                               top_coarse=c["top_coarse"], nprobe=c["nprobe"])
+        dag = build_search_dag(
+            backends["embedder"],
+            backends["ann"],
+            rr_cache[key],
+            backends["store"],
+            top_coarse=c["top_coarse"],
+            nprobe=c["nprobe"],
+        )
         stats = run_latency(dag, queries, k=k)
         pred_rows = []
         for qid, q in enumerate(queries):
             res = run_search(dag, q["query"], q.get("filters"), top_k=k)
-            pred_rows.append({"query_id": qid,
-                              "top10": [r["id"] for r in res["results"]]})
+            pred_rows.append(
+                {"query_id": qid, "top10": [r["id"] for r in res["results"]]}
+            )
         with open(os.path.join(out_dir, f"pred_{slug}.jsonl"), "w") as f:
             for r in pred_rows:
                 f.write(json.dumps(r) + "\n")
         recall = _recall_at_10(gt_rows, pred_rows) if gt_rows else None
-        row = append_ledger(ledger_path, {"sweep": "knob-grid", **c},
-                            stats, recall=recall)
+        row = append_ledger(
+            ledger_path, {"sweep": "knob-grid", **c}, stats, recall=recall
+        )
         p50, viol = pct(stats["total"], 0.5), len(stats["violations"])
-        gate = "PASS" if p50 <= budget_ms and not viol else \
-            ("OVER BUDGET" if p50 > budget_ms else "VIOLATIONS")
+        gate = (
+            "PASS"
+            if p50 <= budget_ms and not viol
+            else ("OVER BUDGET" if p50 > budget_ms else "VIOLATIONS")
+        )
         rec = f" recall={recall:.4f}" if recall is not None else ""
-        log.info(f"{slug}: p50={p50:.2f}ms {gate}{rec} "
-                 f"({stats['n']} queries, {viol} violations)")
+        log.info(
+            f"{slug}: p50={p50:.2f}ms {gate}{rec} "
+            f"({stats['n']} queries, {viol} violations)"
+        )
         rows.append(row)
     return rows
 
@@ -209,24 +251,41 @@ def main(argv: list[str] | None = None) -> int:
     t0 = time.perf_counter()
     if a.synth_docs:
         backends = build_synth_backends(a.synth_docs, a.seed)
-        queries = [{"query": f"synthetic topic {i} about neural search",
-                    "filters": {}} for i in range(a.synth_queries)]
+        queries = [
+            {"query": f"synthetic topic {i} about neural search", "filters": {}}
+            for i in range(a.synth_queries)
+        ]
         gt_rows = None
     else:
         if not a.index or not a.queries:
-            print("sweep: --index + --queries required (or --synth-docs)",
-                  file=sys.stderr)
+            print(
+                "sweep: --index + --queries required (or --synth-docs)", file=sys.stderr
+            )
             return 2
         from scripts.e2e_latency import load_queries
+
         backends = build_real_backends(a.index, None, a.max_query_tokens)
         queries = load_queries(a.queries)
-        gt_rows = [json.loads(l) for l in open(a.gt)] if a.gt else None
-    logger.info(f"grid: nprobe={a.nprobe} top_coarse={a.top_coarse} "
-                f"pair_tokens={a.max_pair_tokens} batch={a.batch_size} "
-                f"k={a.k} queries={len(queries)} -> {out_dir}")
-    run_grid(backends, queries, gt_rows, a.nprobe, a.top_coarse, a.k,
-             out_dir, a.ledger, a.budget_ms, logger,
-             pair_tokens_list=a.max_pair_tokens, batch_sizes=a.batch_size)
+        gt_rows = [json.loads(line) for line in open(a.gt)] if a.gt else None
+    logger.info(
+        f"grid: nprobe={a.nprobe} top_coarse={a.top_coarse} "
+        f"pair_tokens={a.max_pair_tokens} batch={a.batch_size} "
+        f"k={a.k} queries={len(queries)} -> {out_dir}"
+    )
+    run_grid(
+        backends,
+        queries,
+        gt_rows,
+        a.nprobe,
+        a.top_coarse,
+        a.k,
+        out_dir,
+        a.ledger,
+        a.budget_ms,
+        logger,
+        pair_tokens_list=a.max_pair_tokens,
+        batch_sizes=a.batch_size,
+    )
     logger.info(f"sweep done in {time.perf_counter() - t0:.1f}s -> {out_dir}")
     return 0
 

@@ -4,6 +4,7 @@ import os
 
 from exa_home.store import OFFSETS_FILENAME, ContentStore
 
+
 def test_put_get_roundtrip(tmp_path):
     s = ContentStore(str(tmp_path))
     s.put({"id": "a", "url": "https://e.co", "title": "T", "text": "hello world"})
@@ -19,8 +20,10 @@ def test_bulk_offsets_roundtrip_no_rescan(tmp_path):
     root = str(tmp_path)
     s = ContentStore(root)
     s.begin_bulk()
-    docs = [{"id": f"d{i}", "url": f"https://e.co/{i}",
-             "title": "T", "text": f"hello {i}"} for i in range(5)]
+    docs = [
+        {"id": f"d{i}", "url": f"https://e.co/{i}", "title": "T", "text": f"hello {i}"}
+        for i in range(5)
+    ]
     for d in docs:
         s.put(d)
     ipath = s.save_index()

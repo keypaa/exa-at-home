@@ -18,6 +18,7 @@ Domains are lowercased hostnames with a leading `www.` stripped. Dates bucket
 per YYYY-MM matched off the front of the doc `date` string ("" for WET v1, so
 dates are sparse until the WARC upgrade path fills them in).
 """
+
 import argparse
 import json
 import os
@@ -52,6 +53,7 @@ def month_of(date: str) -> str:
 
 def _write_postings(out_dir: str, name: str, postings: dict[str, list[int]]) -> int:
     from pyroaring import BitMap
+
     blob = bytearray()
     offsets: dict[str, list[int]] = {}
     for key in sorted(postings):
@@ -82,7 +84,9 @@ def build(docs: list[dict], out_dir: str, max_terms: int = 50_000) -> dict:
         toks = set(tokenize(d.get("text", "")))
         doc_tokens.append(toks)
         df.update(toks)
-    keep = {t for t, _ in sorted(df.items(), key=lambda kv: (-kv[1], kv[0]))[:max_terms]}
+    keep = {
+        t for t, _ in sorted(df.items(), key=lambda kv: (-kv[1], kv[0]))[:max_terms]
+    }
     terms: dict[str, list[int]] = {}
     for i, toks in enumerate(doc_tokens):
         for t in toks:

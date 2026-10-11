@@ -21,6 +21,7 @@ Consumer contracts (Task 11's MCP server relies on these — keep stable):
   the rerank node normalizes (degraded score = coarse ANN score) so
   run_search results have a uniform shape.
 """
+
 from __future__ import annotations
 
 import concurrent.futures
@@ -51,8 +52,7 @@ class DAG:
                 if d == n.name:
                     raise ValueError(f"DAG: node {n.name!r} depends on itself")
                 if d not in self.nodes:
-                    raise ValueError(
-                        f"DAG: node {n.name!r} depends on unknown {d!r}")
+                    raise ValueError(f"DAG: node {n.name!r} depends on unknown {d!r}")
         self._order = self._topo_sort()
 
     def _topo_sort(self) -> list[str]:
@@ -101,9 +101,16 @@ class DAG:
             except Exception as e:  # noqa: BLE001 — failure is data here
                 dt_ms = (time.perf_counter() - t0) * 1000
                 spans[name] = dt_ms
-                return {"outputs": outputs, "spans": spans,
-                        "error": {"node": name, "error": str(e),
-                                  "type": type(e).__name__, "span_ms": dt_ms}}
+                return {
+                    "outputs": outputs,
+                    "spans": spans,
+                    "error": {
+                        "node": name,
+                        "error": str(e),
+                        "type": type(e).__name__,
+                        "span_ms": dt_ms,
+                    },
+                }
             spans[name] = (time.perf_counter() - t0) * 1000
         return {"outputs": outputs, "spans": spans}
 
@@ -127,7 +134,8 @@ def translate_filters(filters: dict) -> dict:
             raise ValueError(
                 f"unknown filter key {k!r}; allowed: "
                 f"{{domains, date_range, keywords}} (spec shape) or "
-                f"{{domains, month_range, terms, allow}} (Rust shape)")
+                f"{{domains, month_range, terms, allow}} (Rust shape)"
+            )
         out[rust_key] = v
     return out
 
@@ -144,6 +152,7 @@ def build_search_dag(embedder, ann, reranker, store, top_coarse=200, nprobe=8):
     is the one sanctioned mutation (DAG.run still shallow-copies outputs
     per node; only the shared ``_parts`` dict is written through).
     """
+
     def embed_fn(x):
         return embedder.encode_queries([x["query"]])[0]
 
@@ -153,10 +162,8 @@ def build_search_dag(embedder, ann, reranker, store, top_coarse=200, nprobe=8):
         parts = x.get("_parts")
         if parts is not None:
             parts["filter_translate_ms"] = (time.perf_counter() - t0) * 1000
-        ids, scores = ann.search(x["embed"], nprobe=nprobe,
-                                 top_k=top_coarse, **filters)
-        return [{"id": i, "coarse_score": float(s)}
-                for i, s in zip(ids, scores)]
+        ids, scores = ann.search(x["embed"], nprobe=nprobe, top_k=top_coarse, **filters)
+        return [{"id": i, "coarse_score": float(s)} for i, s in zip(ids, scores)]
 
     def rerank_fn(x):
         parts = x.get("_parts")
@@ -164,9 +171,10 @@ def build_search_dag(embedder, ann, reranker, store, top_coarse=200, nprobe=8):
         cands = []
         for c in x["retrieve"]:
             doc = store.get(c["id"])
-            text = (doc.get("text", "") if doc else "")
-            cands.append({"id": c["id"], "text": text,
-                          "coarse_score": c["coarse_score"]})
+            text = doc.get("text", "") if doc else ""
+            cands.append(
+                {"id": c["id"], "text": text, "coarse_score": c["coarse_score"]}
+            )
         fetch_ms = (time.perf_counter() - t0) * 1000
         t1 = time.perf_counter()
         ranked, degraded = reranker.rerank(x["query"], cands)
@@ -197,19 +205,27 @@ def build_search_dag(embedder, ann, reranker, store, top_coarse=200, nprobe=8):
                 text = doc["text"]
             else:
                 text = item.get("text", "")
-            out.append({"id": item["id"],
-                        "snippet": (text or "")[:SNIPPET_CHARS],
-                        "score": item["score"],
-                        "coarse_score": item.get("coarse_score")})
+            out.append(
+                {
+                    "id": item["id"],
+                    "snippet": (text or "")[:SNIPPET_CHARS],
+                    "score": item["score"],
+                    "coarse_score": item.get("coarse_score"),
+                }
+            )
         if parts is not None:
             # Snippet fetch is the store.get loop; formatting is negligible.
             parts["snippet_fetch_ms"] = (time.perf_counter() - t0) * 1000
         return out
 
-    return DAG([Node("embed", embed_fn, []),
-                Node("retrieve", retrieve_fn, ["embed"]),
-                Node("rerank", rerank_fn, ["retrieve"]),
-                Node("snippet", snippet_fn, ["rerank"])])
+    return DAG(
+        [
+            Node("embed", embed_fn, []),
+            Node("retrieve", retrieve_fn, ["embed"]),
+            Node("rerank", rerank_fn, ["retrieve"]),
+            Node("snippet", snippet_fn, ["rerank"]),
+        ]
+    )
 
 
 def run_search(dag, query, filters=None, top_k=10, profile=False):
@@ -220,13 +236,16 @@ def run_search(dag, query, filters=None, top_k=10, profile=False):
     """
     t0 = time.perf_counter()
     parts: dict = {}
-    out = dag.run({"query": query, "filters": filters or {}, "top_k": top_k,
-                   "_parts": parts})
+    out = dag.run(
+        {"query": query, "filters": filters or {}, "top_k": top_k, "_parts": parts}
+    )
     wall_ms = (time.perf_counter() - t0) * 1000
     err = out.get("error")
     rerank_out = out["outputs"].get("rerank") or {}
-    res: dict = {"results": [] if err else list(out["outputs"].get("snippet", [])),
-                 "degraded": True if err else bool(rerank_out.get("degraded", False))}
+    res: dict = {
+        "results": [] if err else list(out["outputs"].get("snippet", [])),
+        "degraded": True if err else bool(rerank_out.get("degraded", False)),
+    }
     if err:
         res["error"] = err
     if profile:

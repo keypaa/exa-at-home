@@ -14,9 +14,13 @@ def make_vectors(n: int, dim: int = 256, seed: int = 0) -> np.ndarray:
 
 def make_docs(n: int, seed: int = 0) -> list[dict]:
     return [
-        {"id": f"doc-{i}", "url": f"https://example.com/{i}",
-         "title": f"Title {i}", "text": f"This is synthetic document {i} about topic {i % 7}.",
-         "date": "2026-01-01"}
+        {
+            "id": f"doc-{i}",
+            "url": f"https://example.com/{i}",
+            "title": f"Title {i}",
+            "text": f"This is synthetic document {i} about topic {i % 7}.",
+            "date": "2026-01-01",
+        }
         for i in range(n)
     ]
 
@@ -48,9 +52,11 @@ def make_wet_gz(path: str, docs: list[dict]) -> None:
                 writer = WARCWriter(gz, gzip=False)
                 payload = d["text"].encode("utf-8")
                 rec = writer.create_warc_record(
-                    d["url"], "conversion",
+                    d["url"],
+                    "conversion",
                     payload=io.BytesIO(payload),
-                    warc_content_type="text/plain")
+                    warc_content_type="text/plain",
+                )
                 writer.write_record(rec)
 
 

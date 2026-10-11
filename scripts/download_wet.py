@@ -8,6 +8,7 @@ CloudFront 403s: the retry loop below rides those out.
 Resume: per-file HTTP `Range` from the current on-disk size; skip files that
 already match the remote Content-Length. 16 workers by default.
 """
+
 import argparse
 import os
 import time
@@ -61,7 +62,7 @@ def fetch_one(url: str, out_dir: str) -> tuple[str, int]:
             return path, os.path.getsize(path)
         except Exception as e:  # transient CloudFront 403s + resets land here
             last = e
-            time.sleep(BACKOFF_S * (2 ** attempt))
+            time.sleep(BACKOFF_S * (2**attempt))
     raise IOError(f"{url}: failed after {RETRIES} attempts: {last}")
 
 
@@ -73,10 +74,14 @@ def main(urls_path: str, out: str, workers: int = 16) -> None:
     with ThreadPoolExecutor(max_workers=workers) as ex:
         for _path, _size in ex.map(lambda u: fetch_one(u, out), urls):
             done += 1
-    total_gb = sum(
-        os.path.getsize(os.path.join(out, u.rsplit("/", 1)[-1]))
-        for u in urls if os.path.exists(os.path.join(out, u.rsplit("/", 1)[-1]))
-    ) / 1e9
+    total_gb = (
+        sum(
+            os.path.getsize(os.path.join(out, u.rsplit("/", 1)[-1]))
+            for u in urls
+            if os.path.exists(os.path.join(out, u.rsplit("/", 1)[-1]))
+        )
+        / 1e9
+    )
     print(f"{done}/{len(urls)} WET files in {out} ({total_gb:.1f} GB)")
 
 

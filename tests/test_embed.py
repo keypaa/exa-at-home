@@ -3,6 +3,7 @@ import numpy as np
 import pytest
 from exa_home.embed import HashEmbedder, get_embedder
 
+
 def test_hash_embedder_shape_and_deterministic():
     e = HashEmbedder(dim=256)
     a = e.encode_queries(["hello world"])
@@ -10,6 +11,7 @@ def test_hash_embedder_shape_and_deterministic():
     assert a.shape == (1, 256) and a.dtype == np.float32
     assert np.array_equal(a, b)
     assert not np.array_equal(a, e.encode_queries(["goodbye"]))
+
 
 @pytest.mark.cloud_only
 def test_real_embedder_truncates_to_256():

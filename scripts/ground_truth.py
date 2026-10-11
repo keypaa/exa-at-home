@@ -9,24 +9,32 @@ serving stack's pred query k — REQUIRED for a meaningful recall number
 (mismatched query sets score ~0.0 by construction; found on-box 2026-09-16).
 The two modes are mutually exclusive.
 """
-import argparse, json
+
+import argparse
+import json
 import numpy as np
+
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--vecs", required=True); ap.add_argument("--ids", required=True)
-    ap.add_argument("--nq", type=int, default=1000); ap.add_argument("--out", required=True)
+    ap.add_argument("--vecs", required=True)
+    ap.add_argument("--ids", required=True)
+    ap.add_argument("--nq", type=int, default=1000)
+    ap.add_argument("--out", required=True)
     ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--queries", default=None,
-                    help="q.jsonl of {query} texts: ground truth per TEXT query "
-                         "(aligns with pred.jsonl query order)")
+    ap.add_argument(
+        "--queries",
+        default=None,
+        help="q.jsonl of {query} texts: ground truth per TEXT query "
+        "(aligns with pred.jsonl query order)",
+    )
     a = ap.parse_args()
     vecs = np.load(a.vecs)
     ids = json.load(open(a.ids))
     if a.queries:
         from exa_home.embed import Embedder
-        qtexts = [json.loads(l)["query"] for l in open(a.queries)
-                  if l.strip()]
+
+        qtexts = [json.loads(line)["query"] for line in open(a.queries) if line.strip()]
         qvecs = Embedder().encode_queries(qtexts)
         qs = [(k, qv) for k, qv in enumerate(qvecs)]
     else:
@@ -37,6 +45,7 @@ def main():
         for k, qv in qs:
             top = np.argsort(-(vecs @ qv), kind="stable")[:10]
             f.write(json.dumps({"query_id": k, "top10": [ids[j] for j in top]}) + "\n")
+
 
 if __name__ == "__main__":
     main()

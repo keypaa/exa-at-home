@@ -11,6 +11,7 @@ The build_index round-trip asserts the IvfIndex.load contract WITHOUT
 importing ann_core (same pattern as Task 12): write via build_index.main,
 verify via exa_home.index_format + independent numpy/struct/json readback.
 """
+
 import json
 import struct
 import subprocess
@@ -31,10 +32,12 @@ def _write_inputs(tmp_path, n=200, k=8, seed=13):
     ids = [d["id"] for d in docs]
     rng = np.random.default_rng(seed)
     centroids = vecs[rng.choice(n, size=k, replace=False)]
-    vpath, ipath, cpath, dpath = (tmp_path / "vecs.npy",
-                                  tmp_path / "ids.json",
-                                  tmp_path / "centroids.npy",
-                                  tmp_path / "docs.jsonl")
+    vpath, ipath, cpath, dpath = (
+        tmp_path / "vecs.npy",
+        tmp_path / "ids.json",
+        tmp_path / "centroids.npy",
+        tmp_path / "docs.jsonl",
+    )
     np.save(vpath, vecs)
     ipath.write_text(json.dumps(ids))
     np.save(cpath, centroids)
@@ -47,13 +50,17 @@ def test_build_index_roundtrip_200_docs(tmp_path):
     exactly per the locked layout (the IvfIndex.load read contract)."""
     from scripts.build_index import main as build
     from exa_home.index_format import (
-        CENTROIDS_FILE, CODES_FILE, DOC_IDS_FILE, LISTS_FILE,
+        CENTROIDS_FILE,
+        CODES_FILE,
+        DOC_IDS_FILE,
+        LISTS_FILE,
         verify_manifest,
     )
 
     n, k, dim = 200, 8, 256
-    vecs, ids, docs, centroids, vpath, ipath, cpath, dpath = \
-        _write_inputs(tmp_path, n, k)
+    vecs, ids, docs, centroids, vpath, ipath, cpath, dpath = _write_inputs(
+        tmp_path, n, k
+    )
     out = tmp_path / "index"
 
     stats = build(str(vpath), str(ipath), str(cpath), str(dpath), str(out))
@@ -66,8 +73,7 @@ def test_build_index_roundtrip_200_docs(tmp_path):
     got_c = np.fromfile(out / CENTROIDS_FILE, dtype="<f4").reshape(k, dim)
     assert np.array_equal(got_c, centroids.astype(np.float32))
     got_codes = np.fromfile(out / CODES_FILE, dtype=np.uint8).reshape(n, 32)
-    want_codes = np.packbits((vecs > 0).astype(np.uint8), axis=1,
-                             bitorder="little")
+    want_codes = np.packbits((vecs > 0).astype(np.uint8), axis=1, bitorder="little")
     assert np.array_equal(got_codes, want_codes)
     raw = (out / LISTS_FILE).read_bytes()
     (k2,) = struct.unpack_from("<I", raw, 0)
@@ -91,6 +97,7 @@ def test_build_index_roundtrip_200_docs(tmp_path):
 
     # The default <out>/store serves back doc text (home_contents path).
     from exa_home.store import OFFSETS_FILENAME, ContentStore
+
     # Offset index written at build time and covered by the manifest.
     assert (out / "store" / OFFSETS_FILENAME).exists()
     assert any(k.endswith(OFFSETS_FILENAME) for k in m["files"])
@@ -102,16 +109,15 @@ def test_build_index_roundtrip_200_docs(tmp_path):
 
 def test_build_index_rejects_shape_mismatch(tmp_path):
     from scripts.build_index import main as build
+
     vecs, ids, _docs, _c, vpath, ipath, cpath, dpath = _write_inputs(tmp_path)
     ipath.write_text(json.dumps(ids[:-1]))  # 199 ids vs 200 vecs
     with pytest.raises(ValueError, match="ids"):
-        build(str(vpath), str(ipath), str(cpath), str(dpath),
-              str(tmp_path / "index"))
+        build(str(vpath), str(ipath), str(cpath), str(dpath), str(tmp_path / "index"))
     bad = tmp_path / "bad.npy"
     np.save(bad, np.zeros((10, 128), dtype=np.float32))
     with pytest.raises(ValueError, match="256"):
-        build(str(bad), str(ipath), str(cpath), str(dpath),
-              str(tmp_path / "index2"))
+        build(str(bad), str(ipath), str(cpath), str(dpath), str(tmp_path / "index2"))
 
 
 def test_select_slice_sql_locked_content():
@@ -120,31 +126,42 @@ def test_select_slice_sql_locked_content():
     query reads an explicit per-file URL list (duck.py 'cloudfront'
     algo) built from crawl-data/<crawl>/cc-index-table.paths.gz."""
     from scripts.select_slice import CRAWL, PARTS_URL, render_sql, warc_to_wet
+
     assert CRAWL == "CC-MAIN-2026-34"
-    assert PARTS_URL.format(crawl=CRAWL) == \
-        ("https://data.commoncrawl.org/crawl-data/CC-MAIN-2026-34/"
-         "cc-index-table.paths.gz")
-    files = ["https://data.commoncrawl.org/cc-index/table/cc-main/warc/"
-             "crawl=CC-MAIN-2026-34/subset=warc/part-00000-x.parquet"]
+    assert PARTS_URL.format(crawl=CRAWL) == (
+        "https://data.commoncrawl.org/crawl-data/CC-MAIN-2026-34/"
+        "cc-index-table.paths.gz"
+    )
+    files = [
+        "https://data.commoncrawl.org/cc-index/table/cc-main/warc/"
+        "crawl=CC-MAIN-2026-34/subset=warc/part-00000-x.parquet"
+    ]
     q = render_sql(files)
     assert "*.parquet" not in q  # explicit list, never a glob
     assert "part-00000-x.parquet" in q
     assert "subset = 'warc'" in q
     assert "fetch_status = 200" in q
-    assert ("content_mime_detected IN "
-            "('text/html', 'application/xhtml+xml')") in q
-    for like in ("content_languages = 'eng'",
-                 "LIKE 'eng,%'", "LIKE '%,eng'", "LIKE '%,eng,%'"):
+    assert ("content_mime_detected IN ('text/html', 'application/xhtml+xml')") in q
+    for like in (
+        "content_languages = 'eng'",
+        "LIKE 'eng,%'",
+        "LIKE '%,eng'",
+        "LIKE '%,eng,%'",
+    ):
         assert like in q, like
     assert "GROUP BY warc_filename" in q
     assert "ORDER BY n_eng DESC" in q
     assert render_sql(files, limit_wet=130).strip().endswith("LIMIT 130")
     # /warc/ -> /wet/ sibling mapping; HTTPS prefix added by to_urls.
-    assert warc_to_wet("crawl-data/CC-MAIN-2026-34/segments/123/warc/f.warc.gz") == \
-        "crawl-data/CC-MAIN-2026-34/segments/123/wet/f.warc.gz"
+    assert (
+        warc_to_wet("crawl-data/CC-MAIN-2026-34/segments/123/warc/f.warc.gz")
+        == "crawl-data/CC-MAIN-2026-34/segments/123/wet/f.warc.gz"
+    )
     from scripts.select_slice import to_urls
-    assert to_urls([("crawl-data/C/segments/1/warc/f.warc.gz", 42)]) == \
-        ["https://data.commoncrawl.org/crawl-data/C/segments/1/wet/f.warc.gz"]
+
+    assert to_urls([("crawl-data/C/segments/1/warc/f.warc.gz", 42)]) == [
+        "https://data.commoncrawl.org/crawl-data/C/segments/1/wet/f.warc.gz"
+    ]
     with pytest.raises(ValueError):
         warc_to_wet("crawl-data/CC-MAIN-2026-34/wet.paths.gz")
 
@@ -152,20 +169,26 @@ def test_select_slice_sql_locked_content():
 def test_select_slice_parts_filter_and_urls():
     """cc-index-table.paths.gz -> subset=warc parts only -> HTTPS URLs."""
     from scripts.select_slice import parts_to_urls
-    paths = ["cc-index/table/cc-main/warc/crawl=CC-MAIN-2026-34/",
-             "cc-index/table/cc-main/warc/crawl=CC-MAIN-2026-34/"
-             "subset=warc/part-00000-x.parquet",
-             "cc-index/table/cc-main/warc/crawl=CC-MAIN-2026-34/"
-             "subset=robotstxt/part-00000-y.parquet"]
+
+    paths = [
+        "cc-index/table/cc-main/warc/crawl=CC-MAIN-2026-34/",
+        "cc-index/table/cc-main/warc/crawl=CC-MAIN-2026-34/"
+        "subset=warc/part-00000-x.parquet",
+        "cc-index/table/cc-main/warc/crawl=CC-MAIN-2026-34/"
+        "subset=robotstxt/part-00000-y.parquet",
+    ]
     urls = parts_to_urls(paths)
-    assert urls == ["https://data.commoncrawl.org/cc-index/table/cc-main/"
-                    "warc/crawl=CC-MAIN-2026-34/subset=warc/"
-                    "part-00000-x.parquet"]
+    assert urls == [
+        "https://data.commoncrawl.org/cc-index/table/cc-main/"
+        "warc/crawl=CC-MAIN-2026-34/subset=warc/"
+        "part-00000-x.parquet"
+    ]
 
 
 def test_download_skips_complete_files(tmp_path, monkeypatch):
     """Skip-existing path needs no network once the size check is mocked."""
     import scripts.download_wet as dw
+
     f = tmp_path / "x.wet.gz"
     f.write_bytes(b"data" * 100)
     monkeypatch.setattr(dw, "_remote_size", lambda url: 400)
@@ -179,6 +202,7 @@ def test_download_resumes_partial_file(tmp_path, monkeypatch):
     import urllib.request
 
     import scripts.download_wet as dw
+
     full = b"0123456789abcdef" * 64  # 1024 bytes
     f = tmp_path / "y.wet.gz"
     f.write_bytes(full[:400])
@@ -211,16 +235,34 @@ def test_download_resumes_partial_file(tmp_path, monkeypatch):
     assert Path(path).read_bytes() == full
 
 
-@pytest.mark.parametrize("script,flags", [
-    ("select_slice.py", ("--crawl", "--lang", "--limit-wet", "--out")),
-    ("download_wet.py", ("--urls", "--out", "--workers")),
-    ("build_index.py", ("--vecs", "--ids", "--centroids", "--docs", "--out",
-                        "--store", "--no-store", "--filter", "--max-terms",
-                        "--crawl")),
-])
+@pytest.mark.parametrize(
+    "script,flags",
+    [
+        ("select_slice.py", ("--crawl", "--lang", "--limit-wet", "--out")),
+        ("download_wet.py", ("--urls", "--out", "--workers")),
+        (
+            "build_index.py",
+            (
+                "--vecs",
+                "--ids",
+                "--centroids",
+                "--docs",
+                "--out",
+                "--store",
+                "--no-store",
+                "--filter",
+                "--max-terms",
+                "--crawl",
+            ),
+        ),
+    ],
+)
 def test_script_cli_help(script, flags):
-    r = subprocess.run([sys.executable, str(SCRIPTS / script), "--help"],
-                       capture_output=True, text=True)
+    r = subprocess.run(
+        [sys.executable, str(SCRIPTS / script), "--help"],
+        capture_output=True,
+        text=True,
+    )
     assert r.returncode == 0, r.stderr
     for flag in flags:
         assert flag in r.stdout, flag
@@ -230,6 +272,7 @@ def test_script_cli_help(script, flags):
 def test_select_slice_live_toy_run(tmp_path):
     """Cloud box: real DuckDB-over-HTTPS query, 4 densest WET URLs."""
     from scripts.select_slice import main
+
     out = tmp_path / "wet_urls.txt"
     urls = main("CC-MAIN-2026-34", 4, str(out))
     assert len(urls) == 4
