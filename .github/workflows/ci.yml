@@ -16,7 +16,7 @@ jobs:
       # Explicit .venv paths: shell activation does not persist across
       # steps, and maturin requires a discoverable venv (.venv in cwd or
       # any parent — repo root qualifies from crates/ann-core).
-      - run: .venv/bin/maturin develop
+      - run: ${{ github.workspace }}/.venv/bin/maturin develop
         working-directory: crates/ann-core
       - run: .venv/bin/ruff check exa_home/ scripts/ tests/ notebooks/
       - run: .venv/bin/ruff format --check exa_home/ scripts/ tests/ notebooks/
