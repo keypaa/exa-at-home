@@ -1,0 +1,21 @@
+name: ci
+
+on: [push, pull_request]
+
+jobs:
+  tier0:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: dtolnay/rust-toolchain@stable
+      - run: pip install -e ".[dev]"
+      - run: python -m maturin develop
+        working-directory: crates/ann-core
+      - run: ruff check exa_home/ scripts/ tests/ notebooks/
+      - run: ruff format --check exa_home/ scripts/ tests/ notebooks/
+      - run: python -m pytest tests/ -m "not cloud_only" -q
+      - run: cargo test -p ann-core
+      - run: cargo fmt --check -p ann-core

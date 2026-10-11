@@ -17,11 +17,9 @@ import argparse
 import json
 import os
 import sys
-import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
-sys.path.insert(0, os.path.join(ROOT, "tests"))
 
 # Spec §7 profile keys from run_search (filter_ms is the measured
 # translate time; the in-scan intersect stays inside ann_ms, so filter
@@ -53,49 +51,21 @@ def load_queries(path: str) -> list[dict]:
     return out
 
 
-class NumpyFakeANN:
-    """Tier-0 ANN stand-in: exact brute-force dot over doc vectors.
-
-    Same injected-backend shape as Task 10's FakeANN
-    (`search(q, nprobe, top_k, **filters) -> (ids, scores)`), but scores are
-    real numpy dots so the retrieve span is representative. Filters are
-    accepted and ignored (documented): the fake corpus has no filter index.
-    """
-
-    def __init__(self, ids: list[str], mat):
-        self.ids = ids
-        self._mat = mat
-
-    def search(self, q, nprobe=8, top_k=200, **filters):
-        import numpy as np
-
-        scores = self._mat @ np.asarray(q, dtype=np.float32)
-        k = min(top_k, len(self.ids))
-        idx = np.argsort(scores, kind="stable")[::-1][:k]
-        return [self.ids[i] for i in idx], [float(scores[i]) for i in idx]
-
-
 def build_synth_dag(
     n_docs: int = 500, seed: int = 0, top_coarse: int = 200, nprobe: int = 8
 ):
-    """500-doc synth index from existing pieces: HashEmbedder + ContentStore
-    + NumpyFakeANN + MockReranker, wired through build_search_dag."""
-    from fixtures.synth import make_docs  # noqa: E402  (tests/ on sys.path)
-
-    from exa_home.embed import HashEmbedder
+    """500-doc synth index: shared backends wired through build_search_dag."""
     from exa_home.orch import build_search_dag
-    from exa_home.rerank import MockReranker
-    from exa_home.store import ContentStore
+    from exa_home.synth import build_synth_backends
 
-    docs = make_docs(n_docs, seed=seed)
-    store = ContentStore(tempfile.mkdtemp(prefix="e2e-store-"))
-    for d in docs:
-        store.put(d)
-    embedder = HashEmbedder(dim=256)
-    mat = embedder.encode_docs([d["text"] for d in docs])
-    ann = NumpyFakeANN([d["id"] for d in docs], mat)
+    b = build_synth_backends(n_docs, seed)
     return build_search_dag(
-        embedder, ann, MockReranker(), store, top_coarse=top_coarse, nprobe=nprobe
+        b["embedder"],
+        b["ann"],
+        b["reranker"],
+        b["store"],
+        top_coarse=top_coarse,
+        nprobe=nprobe,
     )
 
 

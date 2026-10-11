@@ -34,12 +34,10 @@ import json
 import logging
 import os
 import sys
-import tempfile
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
-sys.path.insert(0, os.path.join(ROOT, "tests"))
 
 
 def _timestamp() -> str:
@@ -58,28 +56,11 @@ def fresh_out_dir(base: str) -> str:
 
 
 def build_synth_backends(n_docs: int = 200, seed: int = 0) -> dict:
-    """Tier-0 backends: HashEmbedder + numpy brute-force ANN + mock rerank."""
-    from fixtures.synth import make_docs  # noqa: E402 (tests/ on sys.path)
+    """Tier-0 backends. Thin delegate: the wiring lives exactly once in
+    exa_home.synth (kept here so sweep call sites don't churn)."""
+    from exa_home.synth import build_synth_backends as _build
 
-    from exa_home.embed import HashEmbedder
-    from exa_home.rerank import MockReranker
-    from exa_home.store import ContentStore
-    from scripts.e2e_latency import NumpyFakeANN
-
-    docs = make_docs(n_docs, seed=seed)
-    store = ContentStore(tempfile.mkdtemp(prefix="sweep-store-"))
-    for d in docs:
-        store.put(d)
-    embedder = HashEmbedder(dim=256)
-    mat = embedder.encode_docs([d["text"] for d in docs])
-    ann = NumpyFakeANN([d["id"] for d in docs], mat)
-    return {
-        "embedder": embedder,
-        "ann": ann,
-        "reranker": MockReranker(),
-        "reranker_factory": lambda pt, b: MockReranker(),
-        "store": store,
-    }
+    return _build(n_docs, seed)
 
 
 def build_real_backends(
