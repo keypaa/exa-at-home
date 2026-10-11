@@ -25,7 +25,7 @@ def _remote_size(url: str) -> int | None:
         with urllib.request.urlopen(req, timeout=60) as r:
             ln = r.headers.get("Content-Length")
             return int(ln) if ln else None
-    except Exception:
+    except Exception:  # noqa: BLE001 — size probe is best-effort; None skips
         return None
 
 
@@ -52,7 +52,7 @@ def fetch_one(url: str, out_dir: str) -> tuple[str, int]:
                 elif r.status == 200:
                     mode = "wb"
                 else:
-                    raise IOError(f"unexpected HTTP {r.status} for {url}")
+                    raise OSError(f"unexpected HTTP {r.status} for {url}")
                 with open(path, mode) as f:
                     while True:
                         chunk = r.read(1 << 20)
@@ -60,10 +60,11 @@ def fetch_one(url: str, out_dir: str) -> tuple[str, int]:
                             break
                         f.write(chunk)
             return path, os.path.getsize(path)
-        except Exception as e:  # transient CloudFront 403s + resets land here
+        except Exception as e:  # noqa: BLE001 — transient 403s/resets; retried then raised as OSError
+            # (narrowing would drop an unknown transient class and fail the batch)
             last = e
             time.sleep(BACKOFF_S * (2**attempt))
-    raise IOError(f"{url}: failed after {RETRIES} attempts: {last}")
+    raise OSError(f"{url}: failed after {RETRIES} attempts: {last}")
 
 
 def main(urls_path: str, out: str, workers: int = 16) -> None:

@@ -3,8 +3,7 @@ import gzip
 
 import numpy as np
 import pytest
-
-from fixtures.synth import make_vectors, make_docs, make_wet_gz
+from fixtures.synth import make_docs, make_vectors, make_wet_gz
 
 
 def _conversion_texts(path: str) -> list[bytes]:

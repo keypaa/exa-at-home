@@ -12,6 +12,7 @@ The two modes are mutually exclusive.
 
 import argparse
 import json
+
 import numpy as np
 
 
@@ -30,11 +31,13 @@ def main():
     )
     a = ap.parse_args()
     vecs = np.load(a.vecs)
-    ids = json.load(open(a.ids))
+    with open(a.ids) as f:
+        ids = json.load(f)
     if a.queries:
         from exa_home.embed import Embedder
 
-        qtexts = [json.loads(line)["query"] for line in open(a.queries) if line.strip()]
+        with open(a.queries) as f:
+            qtexts = [json.loads(line)["query"] for line in f if line.strip()]
         qvecs = Embedder().encode_queries(qtexts)
         qs = [(k, qv) for k, qv in enumerate(qvecs)]
     else:

@@ -37,6 +37,7 @@ def test_synth_e2e_exits_zero_with_generous_budget():
         capture_output=True,
         text=True,
         timeout=300,
+        check=False,
     )
     assert r.returncode == 0, f"stdout:\n{r.stdout}\nstderr:\n{r.stderr}"
     assert "waterfall integrity: OK" in r.stdout
@@ -64,7 +65,8 @@ def test_ledger_appends_one_json_row_per_run(tmp_path):
     append_ledger(str(ledger), {"ann": "fake", "n_docs": 100}, stats)
     import json
 
-    rows = [json.loads(line) for line in open(ledger, encoding="utf-8")]
+    with open(ledger, encoding="utf-8") as f:
+        rows = [json.loads(line) for line in f]
     assert len(rows) == 1
     row = rows[0]
     assert row["config"]["ann"] == "fake" and row["n"] == 5
@@ -88,6 +90,7 @@ def test_over_budget_exits_one():
         capture_output=True,
         text=True,
         timeout=300,
+        check=False,
     )
     assert r.returncode == 1, f"stdout:\n{r.stdout}\nstderr:\n{r.stderr}"
     assert "OVER BUDGET" in r.stdout
@@ -118,5 +121,6 @@ def test_real_index_under_100ms_budget():
         capture_output=True,
         text=True,
         timeout=600,
+        check=False,
     )
     assert r.returncode == 0, f"stdout:\n{r.stdout}\nstderr:\n{r.stderr}"

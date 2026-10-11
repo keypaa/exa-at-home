@@ -10,7 +10,6 @@ pytest.importorskip("fastmcp", reason="fastmcp not installed offline; on-box onl
 
 from exa_home.mcp_server import app, home_contents, home_search, wire
 
-
 # --- Stub backends (same method shapes as the real ones; cf. test_orch.py) ---
 
 

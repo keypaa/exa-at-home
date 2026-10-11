@@ -102,8 +102,7 @@ def main(crawl: str, limit_wet: int, out: str) -> list[str]:
     rows = con.execute(render_sql(urls, crawl, limit_wet)).fetchall()
     urls = to_urls(rows)
     with open(out, "w") as f:
-        for u in urls:
-            f.write(u + "\n")
+        f.writelines(u + "\n" for u in urls)
     print(f"{len(urls)} WET URLs -> {out} (crawl {crawl})")
     return urls
 

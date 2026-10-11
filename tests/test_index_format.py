@@ -7,18 +7,18 @@ import numpy as np
 import pytest
 
 from exa_home.index_format import (
+    CENTROIDS_FILE,
+    CODE_BYTES,
+    CODES_FILE,
+    DIM,
+    DOC_IDS_FILE,
+    LISTS_FILE,
+    MANIFEST,
     SCHEMA,
     SCHEMA_VERSION,
-    DIM,
-    CODE_BYTES,
-    MANIFEST,
-    CENTROIDS_FILE,
-    CODES_FILE,
-    LISTS_FILE,
-    DOC_IDS_FILE,
     sha256,
-    write_manifest,
     verify_manifest,
+    write_manifest,
 )
 
 
@@ -52,7 +52,7 @@ def test_manifest_verify_roundtrip(tmp_path):
 
 
 def test_manifest_verify_rejects_corruption(tmp_path):
-    from exa_home.index_format import write_manifest, verify_manifest
+    from exa_home.index_format import verify_manifest, write_manifest
 
     (tmp_path / "a.bin").write_bytes(b"hello")
     write_manifest(str(tmp_path), {"dim": 256})

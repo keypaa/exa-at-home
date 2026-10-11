@@ -8,6 +8,7 @@ test run offline; the real model needs the GPU box + HF download.
 """
 
 from __future__ import annotations
+
 import concurrent.futures
 
 
@@ -31,8 +32,8 @@ class Reranker:
         max_pair_tokens=160,
         max_query_tokens=32,
     ):
-        from sentence_transformers import CrossEncoder
         import torch
+        from sentence_transformers import CrossEncoder
 
         self.timeout_ms = timeout_ms
         self.batch_size = batch_size
@@ -48,12 +49,12 @@ class Reranker:
         self.model = CrossEncoder(model, device=dev)
         try:
             self.model.model.half()  # fp16: the 20-35K pairs/s figures assume it
-        except Exception:
+        except Exception:  # noqa: BLE001, S110 — fp32 fallback is fine, keep quiet
             pass
         # Warmup call: first predict pays CUDA init — never pay it on a live query.
         try:
             self.model.predict([["warmup query", "warmup passage"]])
-        except Exception:
+        except Exception:  # noqa: BLE001, S110 — warmup is best-effort by design
             pass
         self._pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
 
@@ -81,13 +82,13 @@ class Reranker:
                 )
                 try:
                     scores = fut.result(timeout=self.timeout_ms / 1000)
-                except Exception:
+                except Exception:  # noqa: BLE001 — any failure degrades, never raises
                     return list(candidates), True  # degraded: keep coarse ANN order
         else:
             fut = pool.submit(self._score_batch, query, [c["text"] for c in candidates])
             try:
                 scores = fut.result(timeout=self.timeout_ms / 1000)
-            except Exception:
+            except Exception:  # noqa: BLE001 — any failure degrades, never raises
                 return list(candidates), True  # degraded: keep coarse ANN order
         order = sorted(range(len(candidates)), key=lambda i: scores[i], reverse=True)
         return [{**candidates[i], "score": float(scores[i])} for i in order], False

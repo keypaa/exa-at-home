@@ -1,9 +1,11 @@
 # exa_home/ingest.py
 from __future__ import annotations
+
 import hashlib
 import json
+from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Iterator
+
 from warcio.archiveiterator import ArchiveIterator
 
 

@@ -25,10 +25,10 @@ def main(argv=None):
         help="exit 1 when recall@10 < threshold (default: print only, exit 0)",
     )
     a = ap.parse_args(argv)
-    gt = [json.loads(line) for line in open(a.gt)]
-    pr = {
-        json.loads(line)["query_id"]: json.loads(line)["top10"] for line in open(a.pred)
-    }
+    with open(a.gt) as f:
+        gt = [json.loads(line) for line in f]
+    with open(a.pred) as f:
+        pr = {json.loads(line)["query_id"]: json.loads(line)["top10"] for line in f}
     recs = []
     skipped = 0
     for g in gt:

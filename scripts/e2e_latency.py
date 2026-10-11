@@ -81,10 +81,10 @@ def build_real_dag(
     max_query_tokens: int = 32,
 ):
     """Cloud-only path: IvfIndex over a built index/ dir. Lazy imports."""
+    from ann_core import IvfIndex
+
     from exa_home.orch import build_search_dag
     from exa_home.store import ContentStore
-
-    from ann_core import IvfIndex  # noqa: E402  (maturin develop on-box)
 
     if embedder_kind in ("arctic", "real"):  # "arctic" kept as alias (pre-switch runs)
         from exa_home.embed import Embedder
@@ -116,9 +116,9 @@ def build_real_dag(
 
 def run_latency(dag, queries: list[dict], k: int, verbose: bool = False) -> dict:
     """Run every query with profile=True; collect per-stage ms + totals."""
-    from exa_home.orch import run_search
-
     import time
+
+    from exa_home.orch import run_search
 
     t_run = time.perf_counter()
     per_stage = {s: [] for s in STAGE_ORDER}
@@ -170,9 +170,10 @@ def _git_hash() -> str:
             text=True,
             timeout=10,
             cwd=ROOT,
+            check=False,
         )
         return r.stdout.strip() if r.returncode == 0 else "unknown"
-    except Exception:
+    except Exception:  # noqa: BLE001 — provenance must never fail the gate
         return "unknown"
 
 
@@ -188,7 +189,7 @@ def append_ledger(
     import datetime
 
     row = {
-        "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "ts": datetime.datetime.now(datetime.UTC).isoformat(),
         "git": _git_hash(),
         "config": dict(config),
         "n": stats["n"],

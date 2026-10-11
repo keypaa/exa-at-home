@@ -42,8 +42,7 @@ def tokenize(text: str) -> list[str]:
 def domain_of(url: str) -> str:
     host = urlparse(url or "").hostname or ""
     host = host.lower()
-    if host.startswith("www."):
-        host = host[4:]
+    host = host.removeprefix("www.")
     return host
 
 
@@ -103,7 +102,7 @@ def build(docs: list[dict], out_dir: str, max_terms: int = 50_000) -> dict:
     return counts
 
 
-def main(docs_path: str, out: str, max_terms: int, seed: int = 0):  # noqa: ARG001
+def main(docs_path: str, out: str, max_terms: int, seed: int = 0):
     docs = []
     with open(docs_path, encoding="utf-8") as f:
         for line in f:

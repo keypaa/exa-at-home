@@ -14,7 +14,7 @@ SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 
 
 def test_synth_grid_writes_all_artifacts(tmp_path):
-    from scripts.sweep import run_grid, build_synth_backends
+    from scripts.sweep import build_synth_backends, run_grid
 
     backends = build_synth_backends(n_docs=50, seed=0)
     queries = [
@@ -54,7 +54,8 @@ def test_synth_grid_writes_all_artifacts(tmp_path):
         assert (out / f"pred_{slug}.jsonl").exists()
         assert r["config"]["nprobe"] in (1, 2)
         assert r["n"] == 3 and "p50_ms" in r and "recall_at_10" in r
-    ledger_rows = [json.loads(line) for line in open(ledger)]
+    with open(ledger) as f:
+        ledger_rows = [json.loads(line) for line in f]
     assert len(ledger_rows) == 4
 
 
@@ -74,6 +75,7 @@ def test_cli_help_lists_grid_flags():
         [sys.executable, str(SCRIPTS / "sweep.py"), "--help"],
         capture_output=True,
         text=True,
+        check=False,
     )
     assert r.returncode == 0, r.stderr
     for flag in (
@@ -92,7 +94,7 @@ def test_cli_help_lists_grid_flags():
 
 def test_reranker_dims_extend_grid(tmp_path):
     """pair-tokens x batch multiply the grid; reranker rebuilt per combo."""
-    from scripts.sweep import run_grid, build_synth_backends
+    from scripts.sweep import build_synth_backends, run_grid
 
     backends = build_synth_backends(n_docs=50, seed=0)
     queries = [

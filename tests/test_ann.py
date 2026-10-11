@@ -67,7 +67,7 @@ def test_m2_binary_search_matches_numpy_reference():
 def test_m2_from_binary_rejects_bad_shape():
     from ann_core import AnnIndex
 
-    with pytest.raises(Exception):
+    with pytest.raises(ValueError):  # Rust raises PyValueError on bad shape
         AnnIndex.from_binary(
             np.zeros((10, 31), dtype=np.uint8), [f"d{i}" for i in range(10)]
         )
@@ -144,6 +144,7 @@ def test_ivf_search_allow_list_filters(tmp_path):
 
 def test_ivf_load_rejects_corruption(tmp_path):
     from ann_core import IvfIndex
+
     from exa_home.index_format import CODES_FILE
 
     vecs = make_vectors(50, 256, seed=6)
@@ -152,12 +153,13 @@ def test_ivf_load_rejects_corruption(tmp_path):
     raw = bytearray(p.read_bytes())
     raw[0] ^= 0xFF
     p.write_bytes(bytes(raw))
-    with pytest.raises(Exception):
+    with pytest.raises(ValueError):  # manifest verify fails fast, never partial
         IvfIndex.load(str(tmp_path))
 
 
 def test_train_centroids_importable():
     import inspect
+
     from scripts.train_centroids import main as train
 
     params = list(inspect.signature(train).parameters)
@@ -171,7 +173,10 @@ def test_train_centroids_importable():
 def test_train_centroids_cli_help():
     script = Path(__file__).resolve().parent.parent / "scripts" / "train_centroids.py"
     r = subprocess.run(
-        [sys.executable, str(script), "--help"], capture_output=True, text=True
+        [sys.executable, str(script), "--help"],
+        capture_output=True,
+        text=True,
+        check=False,
     )
     assert r.returncode == 0
     for flag in ("--vecs", "--k", "--sample", "--out"):
@@ -293,8 +298,9 @@ def _write_ivf_index_with_filter(tmp_path, vecs, k, docs, seed=0):
 
 
 def test_filter_build_writes_locked_layout(tmp_path):
-    from scripts.build_filter import build
     from pyroaring import BitMap
+
+    from scripts.build_filter import build
 
     out = tmp_path / "filter"
     build(FILTER_DOCS, str(out))

@@ -11,6 +11,7 @@ only the `main()` CLI touches argparse / the network.
 """
 
 from __future__ import annotations
+
 import argparse
 import glob
 import json
@@ -57,8 +58,7 @@ def stage_fetch(
     lines = gzip.decompress(raw).decode("utf-8").splitlines()[:n_wet]
     urls = [f"{BASE}/{line}" for line in lines if line.strip()]
     with open(out, "w") as f:
-        for u in urls:
-            f.write(u + "\n")
+        f.writelines(u + "\n" for u in urls)
     _log("fetch", t0, f" ({len(urls)} URLs -> {out})")
     return urls
 
@@ -100,7 +100,8 @@ def stage_ingest(
 
     t0 = time.perf_counter()
     if _skip(docs_path, force):
-        n = sum(1 for _ in open(docs_path, encoding="utf-8"))
+        with open(docs_path, encoding="utf-8") as f:
+            n = sum(1 for _ in f)
         if verbose:
             print(f"[ingest] reusing {docs_path} ({n} docs)", flush=True)
         return {"docs": n, "reused": True}
@@ -155,6 +156,7 @@ def stage_embed(
 ) -> tuple:
     """docs.jsonl -> vecs.npy + ids.json (real Embedder; GPU box only)."""
     import numpy as np
+
     from exa_home.embed import Embedder
 
     t0 = time.perf_counter()
@@ -163,7 +165,8 @@ def stage_embed(
         if verbose:
             print(f"[embed] reusing {vecs_path} {v.shape}", flush=True)
         return v.shape, str(v.dtype)
-    docs = [json.loads(line) for line in open(docs_path, encoding="utf-8")]
+    with open(docs_path, encoding="utf-8") as f:
+        docs = [json.loads(line) for line in f]
     emb = Embedder()
     if show_progress:
         # Per-batch ticks for long bulk runs (silent by default).
@@ -201,9 +204,9 @@ def stage_index(
     verbose: bool = False,
 ) -> dict:
     """vecs + ids + docs -> versioned index/ (centroids, codes, lists, store)."""
-    from scripts.train_centroids import main as train_main
-    from scripts.build_index import main as build_main
     from exa_home.index_format import verify_manifest
+    from scripts.build_index import main as build_main
+    from scripts.train_centroids import main as train_main
 
     t0 = time.perf_counter()
     cent_path = os.path.join(os.path.dirname(out.rstrip("/")) or ".", "centroids.npy")
@@ -255,10 +258,10 @@ def stage_queries(
         if verbose:
             print(f"[queries] reusing {queries_path} + {gt_path}", flush=True)
         return {"reused": True}
-    docs = [json.loads(line) for line in open(docs_path, encoding="utf-8")]
+    with open(docs_path, encoding="utf-8") as f:
+        docs = [json.loads(line) for line in f]
     with open(queries_path, "w") as f:
-        for d in docs[:nq]:
-            f.write(json.dumps({"query": d["text"][:200]}) + "\n")
+        f.writelines(json.dumps({"query": d["text"][:200]}) + "\n" for d in docs[:nq])
     subprocess.run(
         [
             sys.executable,

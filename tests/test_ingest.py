@@ -10,6 +10,7 @@ pytest.importorskip(
 )
 
 from fixtures.synth import make_docs, make_wet_gz
+
 from exa_home.ingest import read_wet, write_docs_jsonl
 
 

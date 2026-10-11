@@ -28,7 +28,8 @@ def test_bulk_offsets_roundtrip_no_rescan(tmp_path):
         s.put(d)
     ipath = s.save_index()
     assert os.path.basename(ipath) == OFFSETS_FILENAME
-    serial = json.loads(open(ipath, encoding="utf-8").read())
+    with open(ipath, encoding="utf-8") as f:
+        serial = json.loads(f.read())
     assert set(serial) == {f"d{i}" for i in range(5)}
     # Shard names are portable basenames, offsets are ints.
     for shard, off in serial.values():

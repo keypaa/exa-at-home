@@ -52,10 +52,10 @@ def _():
         # then this cell finds it below.
         cands = [os.getcwd()]
         try:
-            f = __file__  # noqa: F821 — absent on some hosts
+            f = __file__
             if isinstance(f, str) and os.path.sep in f:
                 cands.append(os.path.dirname(os.path.dirname(os.path.abspath(f))))
-        except Exception:
+        except Exception:  # noqa: BLE001, S110 — __file__ may not exist; CWD fallback covers it
             pass
         seen = set()
         queue = list(cands)
@@ -69,7 +69,7 @@ def _():
                     return base
                 try:
                     kids = sorted(os.listdir(base))
-                except Exception:
+                except Exception:  # noqa: BLE001, S112 — unreadable dirs are skipped, not fatal
                     continue
                 cands.append(base)
                 for child in kids[:50]:
@@ -78,7 +78,7 @@ def _():
                         if _has_markers(full):
                             return full
                         queue.append(full)
-        except Exception:
+        except Exception:  # noqa: BLE001, S110 — bootstrap never crashes; falls through to CWD
             pass
         for base in cands:
             d = base
@@ -105,7 +105,7 @@ def _():
             sys.path.insert(0, p)
     try:
         kids = sorted(os.listdir(os.getcwd()))[:20]
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — diagnostics must not crash setup
         kids = [f"<unlistable: {e}>"]
     print(
         f"repo root: {ROOT} (markers: "
@@ -124,6 +124,7 @@ def _(ROOT, os):
 
     import marimo as mo
     import plotly.graph_objects as go
+
     from scripts import e2e_latency as e2e
     from scripts import run_pipeline as pipe
 
@@ -157,7 +158,7 @@ def _(R, mo):
         import torch
 
         cuda = f"cuda={torch.cuda.is_available()}"
-    except Exception:
+    except Exception:  # noqa: BLE001, S110 — torch absence is a normal state here
         pass
     status = "\n".join(f"| {m} | {s} |" for m, s in rows)
     missing = [m for m, s in rows if s == "MISSING"]
@@ -280,7 +281,6 @@ def _(R, mo, setup_btn):
             "Setup ran — re-run the **§0 Environment** cell to confirm "
             "everything reads `yes`, then continue below."
         )
-    return
 
 
 @app.cell
@@ -305,7 +305,6 @@ def _(mo):
         store regression can never masquerade as GPU time again.
         """
     )
-    return
 
 
 @app.cell
@@ -333,7 +332,6 @@ def _(R, mode, pipe):
         print(f"slice: {len(slice_urls)} URLs -> wet_urls.txt")
     else:
         print("synth: fetch skipped (no corpus needed)")
-    return
 
 
 @app.cell
@@ -343,7 +341,6 @@ def _(R, mode, pipe):
             R("wet_urls.txt"), R("data", "wet"), workers=16, verbose=True
         )
     print("download: done (or synth-skipped)")
-    return
 
 
 @app.cell
@@ -351,7 +348,6 @@ def _(R, mode, pipe):
     if mode.value == "toy":
         pipe.stage_ingest(R("data", "wet"), R("docs.jsonl"), verbose=True)
     print("ingest: done (or synth-skipped)")
-    return
 
 
 @app.cell
@@ -366,7 +362,6 @@ def _(R, mode, pipe):
             show_progress=True,
         )
     print("embed: done (or synth-skipped)")
-    return
 
 
 @app.cell
@@ -469,7 +464,6 @@ def _(e2e, go, mo, stats):
         yaxis_title="ms",
     )
     mo.vstack([mo.md(f"```\n{table}\n```"), fig_water, fig_p99])
-    return
 
 
 @app.cell
@@ -484,6 +478,7 @@ def _(R, json, mo, mode, nprobe, queries, top_coarse):
         # Knobs follow the sliders (a hardcoded nprobe=8 here once
         # measured one pred five times — M5c lesson, never again).
         from ann_core import IvfIndex
+
         from exa_home.embed import Embedder
         from exa_home.orch import build_search_dag, run_search
         from exa_home.rerank import Reranker
@@ -509,7 +504,6 @@ def _(R, json, mo, mode, nprobe, queries, top_coarse):
                 if (k + 1) % 50 == 0:
                     print(f"pred: {k + 1}/{len(queries)}", flush=True)
         print(f"{len(queries)} predictions -> pred.jsonl")
-    return
 
 
 @app.cell
@@ -522,11 +516,14 @@ def _(R, go, json, mo, mode, os):
             "exist (previous cells). Tier-0 stops the story at latency."
         )
     else:
-        gt_rows = [json.loads(line) for line in open(R("gt.jsonl"), encoding="utf-8")]
-        pr_by_id = {
-            json.loads(line)["query_id"]: json.loads(line)["top10"]
-            for line in open(R("pred.jsonl"), encoding="utf-8")
-        }
+        # _f handles: marimo cells share one namespace, so a bare `f`
+        # would collide across cells (MultipleDefinitionError).
+        with open(R("gt.jsonl"), encoding="utf-8") as _f:
+            gt_rows = [json.loads(line) for line in _f]
+        with open(R("pred.jsonl"), encoding="utf-8") as _f:
+            pr_by_id = {
+                json.loads(line)["query_id"]: json.loads(line)["top10"] for line in _f
+            }
         recs = [
             len(set(g["top10"]) & set(pr_by_id[g["query_id"]])) / 10 for g in gt_rows
         ]
@@ -553,7 +550,6 @@ def _(R, go, json, mo, mode, os):
             yaxis_range=[0, max(0.5, recall * 1.2)],
         )
         mo.vstack([mo.md(f"## Recall@10 = {recall:.4f}"), fig_rec])
-    return
 
 
 @app.cell
@@ -576,11 +572,12 @@ def _(R, e2e, json, mo, mode, nprobe, os, stats, top_coarse):
         and os.path.exists(R("gt.jsonl"))
         and os.path.exists(R("pred.jsonl"))
     ):
-        vgt = [json.loads(line) for line in open(R("gt.jsonl"), encoding="utf-8")]
-        vpr = {
-            json.loads(line)["query_id"]: json.loads(line)["top10"]
-            for line in open(R("pred.jsonl"), encoding="utf-8")
-        }
+        with open(R("gt.jsonl"), encoding="utf-8") as _f:
+            vgt = [json.loads(line) for line in _f]
+        with open(R("pred.jsonl"), encoding="utf-8") as _f:
+            vpr = {
+                json.loads(line)["query_id"]: json.loads(line)["top10"] for line in _f
+            }
         vrecs = [len(set(g["top10"]) & set(vpr[g["query_id"]])) / 10 for g in vgt]
         verdict_recall = sum(vrecs) / len(vrecs)
     row = e2e.append_ledger(R("runs.jsonl"), cfg, stats, recall=verdict_recall)
@@ -593,7 +590,6 @@ def _(R, e2e, json, mo, mode, nprobe, os, stats, top_coarse):
         f"Run banked to `runs.jsonl` — **commit it + push before leaving the box** "
         f"(git {row['git']}, {row['ts']})."
     )
-    return
 
 
 @app.cell
@@ -614,7 +610,6 @@ def _(mo):
           keep-alives — everything attended, everything committed.
         """
     )
-    return
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 # tests/test_embed.py
 import numpy as np
 import pytest
+
 from exa_home.embed import HashEmbedder, get_embedder
 
 

@@ -163,8 +163,9 @@ def test_home_search_translates_spec_shape_filters():
 
 
 def test_home_search_rejects_unknown_filter_keys():
-    from exa_home import orch
     import pytest as _pytest
+
+    from exa_home import orch
 
     with _pytest.raises(ValueError, match="unknown filter key"):
         orch.translate_filters({"bogus": ["x"]})
@@ -172,6 +173,7 @@ def test_home_search_rejects_unknown_filter_keys():
 
 def test_home_search_arg_order_matches_orch_contract():
     import inspect
+
     from exa_home import orch
 
     assert list(inspect.signature(orch.run_search).parameters) == [

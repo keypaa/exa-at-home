@@ -20,7 +20,6 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-
 from fixtures.synth import make_docs, make_vectors
 
 SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
@@ -48,7 +47,6 @@ def _write_inputs(tmp_path, n=200, k=8, seed=13):
 def test_build_index_roundtrip_200_docs(tmp_path):
     """200 synth docs: assemble -> manifest verifies -> bytes parse back
     exactly per the locked layout (the IvfIndex.load read contract)."""
-    from scripts.build_index import main as build
     from exa_home.index_format import (
         CENTROIDS_FILE,
         CODES_FILE,
@@ -56,6 +54,7 @@ def test_build_index_roundtrip_200_docs(tmp_path):
         LISTS_FILE,
         verify_manifest,
     )
+    from scripts.build_index import main as build
 
     n, k, dim = 200, 8, 256
     vecs, ids, docs, centroids, vpath, ipath, cpath, dpath = _write_inputs(
@@ -110,7 +109,7 @@ def test_build_index_roundtrip_200_docs(tmp_path):
 def test_build_index_rejects_shape_mismatch(tmp_path):
     from scripts.build_index import main as build
 
-    vecs, ids, _docs, _c, vpath, ipath, cpath, dpath = _write_inputs(tmp_path)
+    _vecs, ids, _docs, _c, vpath, ipath, cpath, dpath = _write_inputs(tmp_path)
     ipath.write_text(json.dumps(ids[:-1]))  # 199 ids vs 200 vecs
     with pytest.raises(ValueError, match="ids"):
         build(str(vpath), str(ipath), str(cpath), str(dpath), str(tmp_path / "index"))
@@ -133,8 +132,10 @@ def test_select_slice_sql_locked_content():
         "cc-index-table.paths.gz"
     )
     files = [
-        "https://data.commoncrawl.org/cc-index/table/cc-main/warc/"
-        "crawl=CC-MAIN-2026-34/subset=warc/part-00000-x.parquet"
+        (
+            "https://data.commoncrawl.org/cc-index/table/cc-main/warc/"
+            "crawl=CC-MAIN-2026-34/subset=warc/part-00000-x.parquet"
+        )
     ]
     q = render_sql(files)
     assert "*.parquet" not in q  # explicit list, never a glob
@@ -172,16 +173,22 @@ def test_select_slice_parts_filter_and_urls():
 
     paths = [
         "cc-index/table/cc-main/warc/crawl=CC-MAIN-2026-34/",
-        "cc-index/table/cc-main/warc/crawl=CC-MAIN-2026-34/"
-        "subset=warc/part-00000-x.parquet",
-        "cc-index/table/cc-main/warc/crawl=CC-MAIN-2026-34/"
-        "subset=robotstxt/part-00000-y.parquet",
+        (
+            "cc-index/table/cc-main/warc/crawl=CC-MAIN-2026-34/"
+            "subset=warc/part-00000-x.parquet"
+        ),
+        (
+            "cc-index/table/cc-main/warc/crawl=CC-MAIN-2026-34/"
+            "subset=robotstxt/part-00000-y.parquet"
+        ),
     ]
     urls = parts_to_urls(paths)
     assert urls == [
-        "https://data.commoncrawl.org/cc-index/table/cc-main/"
-        "warc/crawl=CC-MAIN-2026-34/subset=warc/"
-        "part-00000-x.parquet"
+        (
+            "https://data.commoncrawl.org/cc-index/table/cc-main/"
+            "warc/crawl=CC-MAIN-2026-34/subset=warc/"
+            "part-00000-x.parquet"
+        )
     ]
 
 
@@ -262,6 +269,7 @@ def test_script_cli_help(script, flags):
         [sys.executable, str(SCRIPTS / script), "--help"],
         capture_output=True,
         text=True,
+        check=False,
     )
     assert r.returncode == 0, r.stderr
     for flag in flags:

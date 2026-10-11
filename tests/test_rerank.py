@@ -52,6 +52,7 @@ def test_real_model_200_pairs_under_40ms():
     First run downloads ~90MB from HuggingFace (no egress in sandbox).
     """
     import torch
+
     from exa_home.rerank import Reranker
 
     assert torch.cuda.is_available(), "rerank budget test needs a CUDA GPU"

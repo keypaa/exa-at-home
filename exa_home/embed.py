@@ -1,6 +1,8 @@
 # exa_home/embed.py
 from __future__ import annotations
+
 import hashlib
+
 import numpy as np
 
 # mxbai-embed-large-v1 prompt contract (verified on card: query prompt is built

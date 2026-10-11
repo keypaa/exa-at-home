@@ -72,11 +72,11 @@ def build_real_backends(
     rebuilding per (pair-tokens, batch) combo reloads the ~90MB model,
     so instances are shared across the nprobe x top_coarse plane.
     """
+    from ann_core import IvfIndex
+
     from exa_home.embed import Embedder
     from exa_home.rerank import Reranker
     from exa_home.store import ContentStore
-
-    from ann_core import IvfIndex  # noqa: E402 (maturin develop on-box)
 
     def _factory(max_pair_tokens: int, batch_size: int) -> Reranker:
         return Reranker(
@@ -180,8 +180,7 @@ def run_grid(
                 {"query_id": qid, "top10": [r["id"] for r in res["results"]]}
             )
         with open(os.path.join(out_dir, f"pred_{slug}.jsonl"), "w") as f:
-            for r in pred_rows:
-                f.write(json.dumps(r) + "\n")
+            f.writelines(json.dumps(r) + "\n" for r in pred_rows)
         recall = _recall_at_10(gt_rows, pred_rows) if gt_rows else None
         row = append_ledger(
             ledger_path, {"sweep": "knob-grid", **c}, stats, recall=recall
@@ -247,7 +246,11 @@ def main(argv: list[str] | None = None) -> int:
 
         backends = build_real_backends(a.index, None, a.max_query_tokens)
         queries = load_queries(a.queries)
-        gt_rows = [json.loads(line) for line in open(a.gt)] if a.gt else None
+        if a.gt:
+            with open(a.gt) as f:
+                gt_rows = [json.loads(line) for line in f]
+        else:
+            gt_rows = None
     logger.info(
         f"grid: nprobe={a.nprobe} top_coarse={a.top_coarse} "
         f"pair_tokens={a.max_pair_tokens} batch={a.batch_size} "
