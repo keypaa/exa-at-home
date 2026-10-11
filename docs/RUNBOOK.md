@@ -283,6 +283,28 @@ python scripts/measure_recall.py --gt gt.jsonl --pred pred.jsonl
 cargo bench -p ann-core --bench search_bench   # run from repo root
 ```
 
+### Sweeps — multi-point curves in one command (no hand-tuning)
+
+`scripts/sweep.py` runs a knob grid (nprobe × top_coarse × pair-tokens ×
+batch) with shared backends: per-combo gate + serving-stack predictions +
+recall, one full-config ledger row each (config + p50/p99 + recall — never
+ambiguous), artifacts under timestamped `sweeps/YYYYMMDD-HHMMSS/`
+(`grid.json`, `pred_<slug>.jsonl`, `sweep.log`), ledger append-only.
+Reranker instances rebuild per (pair-tokens, batch) combo and cache across
+the rest of the plane.
+
+```bash
+# pair-tokens curve at the operating point (~1 min, proven 2026-10-11)
+python scripts/sweep.py --index index/ --queries q.jsonl --gt gt.jsonl \
+    --nprobe 8 --top-coarse 50 --max-pair-tokens 32 64 --batch-size 32 \
+    --out sweeps/ --ledger runs.jsonl
+# full funnel map (M5c + M5d + M5e in one go, ~15 min attended)
+python scripts/sweep.py --index index/ --queries q.jsonl --gt gt.jsonl \
+    --nprobe 1 2 4 8 16 --top-coarse 50 100 200 --max-pair-tokens 32 64 \
+    --batch-size 32 --out sweeps/ --ledger runs.jsonl
+# download runs.jsonl + the sweeps/<ts>/ dir; commit both, never the index/
+```
+
 Deferred measurements — all funnel through this runbook; none can land sooner:
 
 - (pre) **mxbai doc-side prefix verify**: confirm on box whether

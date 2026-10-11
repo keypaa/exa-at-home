@@ -447,13 +447,28 @@ def _(R, go, json, mo, mode, os):
 
 
 @app.cell
-def _(R, e2e, mo, stats):
+def _(R, e2e, json, mo, mode, nprobe, os, stats, top_coarse):
     total_p50 = e2e.pct(stats["total"], 0.5)
     verdict = "PASS" if total_p50 < 100.0 else "OVER BUDGET"
-    row = e2e.append_ledger(R("runs.jsonl"),
-                            {"notebook": "m5_gate", "n": stats["n"]}, stats)
+    # Full knob config on every row (the pre-suite rows were ambiguous —
+    # never again). Recall when pred+gt exist (toy, recall cell ran),
+    # else None (synth stops at latency by design).
+    cfg = {"notebook": "m5_gate", "mode": mode.value,
+           "nprobe": nprobe.value, "top_coarse": top_coarse.value,
+           "n": stats["n"]}
+    verdict_recall = None
+    if mode.value == "toy" and os.path.exists(R("gt.jsonl")) and \
+            os.path.exists(R("pred.jsonl")):
+        vgt = [json.loads(line) for line in open(R("gt.jsonl"), encoding="utf-8")]
+        vpr = {json.loads(line)["query_id"]: json.loads(line)["top10"]
+               for line in open(R("pred.jsonl"), encoding="utf-8")}
+        vrecs = [len(set(g["top10"]) & set(vpr[g["query_id"]])) / 10
+                 for g in vgt]
+        verdict_recall = sum(vrecs) / len(vrecs)
+    row = e2e.append_ledger(R("runs.jsonl"), cfg, stats, recall=verdict_recall)
+    rec_txt = f", recall@{verdict_recall:.4f}" if verdict_recall is not None else ""
     mo.md(
-        f"## Verdict: {verdict} — total p50 {total_p50:.2f}ms vs 100ms budget\n\n"
+        f"## Verdict: {verdict} — total p50 {total_p50:.2f}ms vs 100ms budget{rec_txt}\n\n"
         f"Waterfall integrity: "
         f"{'OK' if not stats['violations'] else 'FAIL'} "
         f"({len(stats['violations'])} violations). "
