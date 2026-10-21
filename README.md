@@ -155,5 +155,6 @@ yet and no CI step runs it** — the gate is currently manual/cloud-only.
 - [ ] Waterfall tolerance 10%+2ms; optional answer/similar DAG nodes
 
 Working plan and open decisions: [`WORKPLAN.md`](WORKPLAN.md).
+The map — what we did, what we're doing, what's next, where it's going: [`ROADMAP.md`](ROADMAP.md).
 Spec: `zenno/specs/2026-09-13-exa-at-home-design.md` · historical plan:
 `zenno/plans/2026-09-13-exa-at-home.md`
