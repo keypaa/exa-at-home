@@ -73,62 +73,93 @@ Keep the `target_id` exactly as printed in step 1.
 
 ## Step 3 — run the paired comparison (on the box)
 
+The target document id is read from `eval/sampled_targets.json` **by index**
+(sampled on the box) — never transcribed by hand, so a mistyped hash cannot
+silently mark every query a miss.
+
 ```python
-import json, os, sys
+import json, os, sys, urllib.request
 import numpy as np
 
 for cand in [os.getcwd(), "/marimo/exa-at-home"]:
     if os.path.isdir(os.path.join(cand, "exa_home")):
         ROOT = cand; break
+else:
+    raise SystemExit(f"repo not found; cwd={os.getcwd()}")
 sys.path.insert(0, ROOT)
+
+QPATH = f"{ROOT}/eval/questions_toy_20261021.json"
+if not os.path.exists(QPATH):
+    url = ("https://raw.githubusercontent.com/keypaa/exa-at-home/"
+           "main/eval/questions_toy_20261021.json")
+    print("downloading questions from", url)
+    urllib.request.urlretrieve(url, QPATH)
+QQ = json.load(open(QPATH))["questions"]
+TARGETS = json.load(open(f"{ROOT}/eval/sampled_targets.json"))
+Q = [{"question": q["question"], "target_id": TARGETS[q["n"]]["id"]} for q in QQ]
+print(f"questions: {len(Q)}  (targets by index from sampled_targets.json)")
 
 from exa_home.embed import Embedder
 from exa_home.rerank import Reranker
+from exa_home.store import ContentStore
 from ann_core import IvfIndex
 
-Q = json.load(open(f"{ROOT}/eval/questions_toy_20261021.json"))
 ann = IvfIndex.load(f"{ROOT}/index")
-emb, rr = Embedder(), Reranker(max_pair_tokens=64, batch_size=32, max_query_tokens=32)
+store = ContentStore(f"{ROOT}/index/store")
+emb, rr = Embedder(), Reranker(max_pair_tokens=64, batch_size=32,
+                               max_query_tokens=32)
 qv = np.atleast_2d(emb.encode_queries([q["question"] for q in Q]))
+K = json.load(open(f"{ROOT}/index/manifest.json"))["n_centroids"]
 
-coarse_hit = reranked_hit = 0
-coarse_mrr = reranked_mrr = 0.0
-wins = losses = ties = 0
+rows = []
 for i, q in enumerate(Q):
-    vec = qv[i]
+    vec, tgt = qv[i], q["target_id"]
     c50, _ = ann.search(vec, nprobe=8, top_k=50)
-    texts = []
-    for cid in c50:
-        with open(f"{ROOT}/docs.jsonl", encoding="utf-8") as f:   # slow but simple
-            for line in f:
-                d = json.loads(line)
-                if d["id"] == cid:
-                    texts.append(" ".join((d.get("text") or "").split())[:2000])
-                    break
-    ranked, deg = rr.rerank(q["question"], [{"id": c, "text": t} for c, t in zip(c50, texts)])
-    rr_ids = [r["id"] for r in ranked]
-
-    tgt = q["target_id"]
+    texts = [(store.get(c) or {}).get("text", "")[:2000] for c in c50]
+    ranked, deg = rr.rerank(q["question"],
+                            [{"id": c, "text": t} for c, t in zip(c50, texts)])
+    r50 = [r["id"] for r in ranked]
     c_pos = c50.index(tgt) + 1 if tgt in c50 else 0
-    r_pos = rr_ids.index(tgt) + 1 if tgt in rr_ids else 0
-    coarse_hit += c_pos <= 10 and c_pos > 0
-    reranked_hit += r_pos <= 10 and r_pos > 0
-    coarse_mrr += 1 / c_pos if c_pos else 0
-    reranked_mrr += 1 / r_pos if r_pos else 0
-    if (r_pos <= 10) > (c_pos <= 10):
-        wins += 1
-    elif (c_pos <= 10) > (r_pos <= 10):
-        losses += 1
-    else:
-        ties += 1
-    print(f"Q{i:<3} target_found_coarse={c_pos:<3} reranked={r_pos:<3} deg={deg}")
+    r_pos = r50.index(tgt) + 1 if tgt in r50 else 0
+    rows.append({"n": i, "target": tgt, "coarse_pos": c_pos,
+                 "reranked_pos": r_pos, "degraded": bool(deg),
+                 "question": q["question"]})
+    print(f"Q{i:<3} coarse_pos={c_pos:<3} reranked_pos={r_pos:<3} deg={deg}")
 
-n = len(Q)
-print(f"\nqueries: {n}")
-print(f"target recall@10  coarse={coarse_hit/n:.3f}  reranked={reranked_hit/n:.3f}")
-print(f"target MRR        coarse={coarse_mrr/n:.3f}  reranked={reranked_mrr/n:.3f}")
-print(f"paired: reranker wins {wins} / loses {losses} / ties {ties}")
+n = len(rows)
+hit = lambda p: 1 if 1 <= p <= 10 else 0
+mrr = lambda p: (1.0 / p) if 1 <= p <= 10 else 0.0
+c_hit = sum(hit(r["coarse_pos"]) for r in rows)
+r_hit = sum(hit(r["reranked_pos"]) for r in rows)
+c_mrr = sum(mrr(r["coarse_pos"]) for r in rows) / n
+r_mrr = sum(mrr(r["reranked_pos"]) for r in rows) / n
+wins = sum(1 for r in rows if hit(r["reranked_pos"]) and not hit(r["coarse_pos"]))
+loss = sum(1 for r in rows if hit(r["coarse_pos"]) and not hit(r["reranked_pos"]))
+
+print(f"\n=== E3 RESULT (n={n}) ===")
+print(f"target recall@10   coarse={c_hit/n:.3f}   reranked={r_hit/n:.3f}")
+print(f"target MRR@10       coarse={c_mrr:.3f}   reranked={r_mrr:.3f}")
+print(f"paired: reranker wins {wins} / loses {loss} / ties {n-wins-loss}")
+
+try:
+    vecs = np.load(f"{ROOT}/vecs.npy", mmap_mode="r")
+    ids = json.load(open(f"{ROOT}/ids.json"))
+    pos = {d: i for i, d in enumerate(ids)}
+    ceil = 0
+    for i in range(n):
+        scores = np.asarray(vecs) @ qv[i]
+        exact = set(np.argsort(-scores, kind="stable")[:10].tolist())
+        got, _ = ann.search(qv[i], nprobe=K, top_k=10)
+        ceil += len(exact & {pos[g] for g in got if g in pos}) / 10
+    print(f"binary ceiling (nprobe=K={K}, full scan vs exact float): {ceil/n:.3f}")
+    print(f"  routing loss vs quantization loss: {c_hit/n:.3f} @ nprobe=8 "
+          f"vs {ceil/n:.3f} at the ceiling")
+except Exception as e:
+    print(f"(ceiling measurement skipped: {e})")
+
+json.dump({"rows": rows, "coarse_recall10": c_hit/n, "reranked_recall10": r_hit/n,
+           "coarse_mrr10": c_mrr, "reranked_mrr10": r_mrr,
+           "wins": wins, "losses": loss, "ties": n - wins - loss},
+          open(f"{ROOT}/eval/e3_result.json", "w"), indent=1)
+print("\nsaved eval/e3_result.json — download it and give it to me")
 ```
-
-(The docs lookup in step 3 is deliberately simple — replace it with the
-content store's `get()` if it is slow.)
