@@ -32,6 +32,8 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from .config import OPERATING_POINT
+
 SNIPPET_CHARS = 300
 
 
@@ -205,12 +207,24 @@ def translate_filters(filters: dict) -> dict:
     return out
 
 
-def build_search_dag(embedder, ann, reranker, store, top_coarse=200, nprobe=8):
+def build_search_dag(
+    embedder,
+    ann,
+    reranker,
+    store,
+    top_coarse=OPERATING_POINT["top_coarse"],
+    nprobe=OPERATING_POINT["nprobe"],
+):
     """Assemble embed -> retrieve [filter in retrieve] -> rerank -> snippet.
 
     Every backend arrives via a constructor arg (mock-friendly). Filters
     are translated to ann.search kwargs via translate_filters — never
     reinterpreted beyond that naming map.
+
+    Defaults come from exa_home.config.OPERATING_POINT — the configuration
+    the EXPERIMENTS.md rows were measured at. The default used to be
+    top_coarse=200 while every measurement used 50, i.e. the shipped
+    default was 4x the validated work.
 
     Sub-span side channel: run_search injects a mutable ``_parts`` dict
     into the DAG inputs; node fns record fetch/model splits there. This

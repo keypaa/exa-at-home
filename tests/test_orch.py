@@ -7,6 +7,14 @@ method shapes (embedder.encode_queries / ann.search / reranker.rerank /
 store.get). Integration against the real IvfIndex needs on-box pytest.
 """
 
+from fixtures.backends import (
+    FakeANN,
+    FakeEmbedder,
+    FakeReranker,
+    FakeStore,
+    make_docs,
+)
+
 from exa_home.orch import DAG, Node, build_search_dag, run_search
 
 
@@ -51,60 +59,9 @@ def test_failure_cancels_dependents_keeps_spans():
     )
 
 
-# --- Fake backends (offline stand-ins with the real method shapes) ---
-
-
-class FakeEmbedder:
-    def __init__(self):
-        self.calls = []
-
-    def encode_queries(self, texts):
-        self.calls.extend(texts)
-        return [[float(len(t))] for t in texts]  # 1-d "embedding"
-
-
-class FakeANN:
-    def __init__(self, ids=("d0", "d1", "d2")):
-        self.ids = list(ids)
-        self.seen_kwargs = []
-
-    def search(self, q, nprobe=8, top_k=200, **filters):
-        self.seen_kwargs.append(dict(filters))
-        ids = self.ids[:top_k]
-        return ids, [1.0 - 0.1 * i for i in range(len(ids))]
-
-
-class FakeReranker:
-    """Success path: sorts by coarse desc + attaches score (real shape)."""
-
-    def __init__(self, degraded=False):
-        self.degraded = degraded
-
-    def rerank(self, query, candidates):
-        if self.degraded:  # degraded items LACK "score" (Task 9 contract)
-            return list(candidates), True
-        ranked = sorted(candidates, key=lambda c: c["coarse_score"], reverse=True)
-        return [{**c, "score": c["coarse_score"] + 0.01} for c in ranked], False
-
-
-class FakeStore:
-    def __init__(self, docs):
-        self.docs = docs
-
-    def get(self, doc_id):
-        return self.docs.get(doc_id)
-
-
-def _docs():
-    return {
-        f"d{i}": {"id": f"d{i}", "text": f"passage {i} about neural search " * 20}
-        for i in range(3)
-    }
-
-
 def test_search_waterfall_sums_to_wall():
     dag = build_search_dag(
-        FakeEmbedder(), FakeANN(), FakeReranker(), FakeStore(_docs())
+        FakeEmbedder(), FakeANN(), FakeReranker(), FakeStore(make_docs())
     )
     res = run_search(dag, "topic 3", {}, top_k=5, profile=True)
     stage_keys = ("embed_ms", "ann_ms", "filter_ms", "rerank_ms", "snippet_ms")
@@ -120,7 +77,7 @@ def test_search_waterfall_sums_to_wall():
 
 def test_filters_pass_straight_through_to_ann():
     ann = FakeANN()
-    dag = build_search_dag(FakeEmbedder(), ann, FakeReranker(), FakeStore(_docs()))
+    dag = build_search_dag(FakeEmbedder(), ann, FakeReranker(), FakeStore(make_docs()))
     filters = {"domains": ["example.com"], "terms": ["alpha", "beta"]}
     res = run_search(dag, "q", filters, top_k=5)
     assert ann.seen_kwargs and ann.seen_kwargs[0] == filters
@@ -149,7 +106,7 @@ def test_spec_shape_filters_translate_to_rust_kwargs():
 
 def test_degraded_rerank_has_uniform_score_shape():
     dag = build_search_dag(
-        FakeEmbedder(), FakeANN(), FakeReranker(degraded=True), FakeStore(_docs())
+        FakeEmbedder(), FakeANN(), FakeReranker(degraded=True), FakeStore(make_docs())
     )
     res = run_search(dag, "q", {}, top_k=5)
     assert res["degraded"] is True
@@ -238,7 +195,7 @@ def test_store_miss_candidates_are_dropped_and_counted():
         FakeEmbedder(),
         ann,
         FakeReranker(),
-        FakeStore(_docs()),  # "ghost" missing
+        FakeStore(make_docs()),  # "ghost" missing
     )
     res = run_search(dag, "q", {}, top_k=5, profile=True)
     assert [r["id"] for r in res["results"]] == ["d0", "d1"]
@@ -268,7 +225,7 @@ def test_profile_splits_rerank_fetch_vs_model():
     """The M5b lesson: rerank_ms must decompose into store-fetch vs
     model time so a store regression can't masquerade as GPU time."""
     dag = build_search_dag(
-        FakeEmbedder(), FakeANN(), FakeReranker(), FakeStore(_docs())
+        FakeEmbedder(), FakeANN(), FakeReranker(), FakeStore(make_docs())
     )
     res = run_search(dag, "topic 3", {}, top_k=5, profile=True)
     p = res["profile"]

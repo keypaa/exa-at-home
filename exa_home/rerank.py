@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import concurrent.futures
 
+from .config import OPERATING_POINT, RERANKER_MODEL
+
 
 class MockReranker:
     """Deterministic stub: reverses input, never degraded.
@@ -25,12 +27,12 @@ class MockReranker:
 class Reranker:
     def __init__(
         self,
-        model="cross-encoder/ms-marco-MiniLM-L6-v2",
+        model=RERANKER_MODEL,
         timeout_ms=100,
-        batch_size=128,
+        batch_size=OPERATING_POINT["batch_size"],
         device=None,
-        max_pair_tokens=160,
-        max_query_tokens=32,
+        max_pair_tokens=OPERATING_POINT["max_pair_tokens"],
+        max_query_tokens=OPERATING_POINT["max_query_tokens"],
     ):
         import torch
         from sentence_transformers import CrossEncoder

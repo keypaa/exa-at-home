@@ -5,6 +5,8 @@ import hashlib
 
 import numpy as np
 
+from .config import DIM, EMBEDDER_MODEL
+
 # mxbai-embed-large-v1 prompt contract (verified on card: query prompt is built
 # into the ST config as prompt_name="query"; docs encode unprefixed).
 # ST usage: model.encode(texts, prompt_name="query") for queries, plain for docs.
@@ -15,7 +17,7 @@ DOC_KWARGS = {}
 class HashEmbedder:
     """Deterministic stub for Tier 0/1. Same interface, no model."""
 
-    def __init__(self, dim: int = 256):
+    def __init__(self, dim: int = DIM):
         self.dim = dim
 
     def _one(self, text: str) -> np.ndarray:
@@ -31,21 +33,8 @@ class HashEmbedder:
         return np.stack([self._one(t) for t in texts])
 
 
-_singleton = None
-
-
-def get_embedder(model: str = "mixedbread-ai/mxbai-embed-large-v1", dim: int = 256):
-    """Persistent singleton. First call loads GPU model; never call per-query cold."""
-    global _singleton
-    if _singleton is None:
-        _singleton = Embedder(model, dim)
-    return _singleton
-
-
 class Embedder:
-    def __init__(
-        self, model: str = "mixedbread-ai/mxbai-embed-large-v1", dim: int = 256
-    ):
+    def __init__(self, model: str = EMBEDDER_MODEL, dim: int = DIM):
         from sentence_transformers import SentenceTransformer
 
         self.dim = dim

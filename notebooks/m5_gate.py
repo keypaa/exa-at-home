@@ -317,8 +317,14 @@ def _(mo):
         value="synth",
         label="Mode (synth = fakes, seconds / toy = 4-WET rebuild, box, ~30 min)",
     )
-    top_coarse = mo.ui.slider(10, 200, value=50, step=10, label="top_coarse")
-    nprobe = mo.ui.slider(1, 16, value=8, step=1, label="nprobe")
+    from exa_home.config import OPERATING_POINT
+
+    top_coarse = mo.ui.slider(
+        10, 200, value=OPERATING_POINT["top_coarse"], step=10, label="top_coarse"
+    )
+    nprobe = mo.ui.slider(
+        1, 16, value=OPERATING_POINT["nprobe"], step=1, label="nprobe"
+    )
     mo.hstack([mode, top_coarse, nprobe])
     return mode, nprobe, top_coarse
 
@@ -365,7 +371,7 @@ def _(R, mode, pipe):
 
 
 @app.cell
-def _(R, e2e, mode, nprobe, pipe, top_coarse):
+def _(OPERATING_POINT, R, e2e, mode, nprobe, pipe, top_coarse):
     if mode.value == "toy":
         pipe.stage_index(
             R("vecs.npy"),
@@ -390,9 +396,9 @@ def _(R, e2e, mode, nprobe, pipe, top_coarse):
             "real",
             top_coarse=top_coarse.value,
             nprobe=nprobe.value,
-            max_pair_tokens=64,
-            batch_size=32,
-            max_query_tokens=32,
+            max_pair_tokens=OPERATING_POINT["max_pair_tokens"],
+            batch_size=OPERATING_POINT["batch_size"],
+            max_query_tokens=OPERATING_POINT["max_query_tokens"],
         )
         queries = e2e.load_queries(R("q.jsonl"))
         print(
@@ -467,7 +473,7 @@ def _(e2e, go, mo, stats):
 
 
 @app.cell
-def _(R, json, mo, mode, nprobe, queries, top_coarse):
+def _(OPERATING_POINT, R, json, mo, mode, nprobe, queries, top_coarse):
     if mode.value == "synth":
         mo.md(
             "Synth mode skips predictions by design — they need the box "
@@ -487,7 +493,11 @@ def _(R, json, mo, mode, nprobe, queries, top_coarse):
         dag_pred = build_search_dag(
             Embedder(),
             IvfIndex.load(R("index")),
-            Reranker(max_pair_tokens=64, batch_size=32, max_query_tokens=32),
+            Reranker(
+                max_pair_tokens=OPERATING_POINT["max_pair_tokens"],
+                batch_size=OPERATING_POINT["batch_size"],
+                max_query_tokens=OPERATING_POINT["max_query_tokens"],
+            ),
             ContentStore(R("index", "store")),
             top_coarse=top_coarse.value,
             nprobe=nprobe.value,
@@ -553,7 +563,7 @@ def _(R, go, json, mo, mode, os):
 
 
 @app.cell
-def _(R, e2e, json, mo, mode, nprobe, os, stats, top_coarse):
+def _(OPERATING_POINT, R, e2e, json, mo, mode, nprobe, os, stats, top_coarse):
     total_p50 = e2e.pct(stats["total"], 0.5)
     verdict = "PASS" if total_p50 < 100.0 else "OVER BUDGET"
     # Full knob config on every row (the pre-suite rows were ambiguous —
@@ -564,6 +574,11 @@ def _(R, e2e, json, mo, mode, nprobe, os, stats, top_coarse):
         "mode": mode.value,
         "nprobe": nprobe.value,
         "top_coarse": top_coarse.value,
+        "max_pair_tokens": OPERATING_POINT["max_pair_tokens"],
+        "batch_size": OPERATING_POINT["batch_size"],
+        "max_query_tokens": OPERATING_POINT["max_query_tokens"],
+        "k": OPERATING_POINT["k"],
+        "budget_ms": OPERATING_POINT["budget_ms"],
         "n": stats["n"],
     }
     verdict_recall = None
