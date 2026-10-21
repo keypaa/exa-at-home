@@ -106,8 +106,10 @@ class Embedder:
         return self._encode(texts, batch_size=1)
 
     def encode_docs(
-        self, texts: list[str], batch_size: int | None = None,
-        sort_by_length: bool = True
+        self,
+        texts: list[str],
+        batch_size: int | None = None,
+        sort_by_length: bool = True,
     ) -> np.ndarray:
         """Bulk document encoding (offline path).
 

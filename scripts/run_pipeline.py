@@ -503,11 +503,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--workers", type=int, default=DOWNLOAD_WORKERS, help="download workers"
     )
     ap.add_argument(
-        "--batch", type=int, default=EMBED_BATCH,
+        "--batch",
+        type=int,
+        default=EMBED_BATCH,
         help="GPU batch size for bulk embedding",
     )
     ap.add_argument(
-        "--chunk", type=int, default=EMBED_CHUNK,
+        "--chunk",
+        type=int,
+        default=EMBED_CHUNK,
         help="docs held in RAM per flush (streaming boundary)",
     )
     sub = ap.add_subparsers(dest="cmd", required=True)
