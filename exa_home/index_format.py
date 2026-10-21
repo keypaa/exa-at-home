@@ -115,6 +115,7 @@ def write_manifest(index_dir: str, meta: dict) -> None:
             {
                 "version": SCHEMA_VERSION,
                 "has_filter": has_filter,
+                "schema": SCHEMA,
                 **meta,
                 "files": files,
             },
@@ -130,6 +131,14 @@ def verify_manifest(index_dir: str) -> dict:
         raise ValueError(
             f"unsupported index version {m.get('version')!r}: "
             f"this code reads version {SCHEMA_VERSION}"
+        )
+    # The schema travels WITH the index, so a layout change is detected by
+    # the verifier instead of by a confusing load-time failure. Validated
+    # when present (older manifests predate it).
+    if "schema" in m and m["schema"] != SCHEMA:
+        raise ValueError(
+            f"{MANIFEST} schema does not match this code's layout: "
+            f"index was written with a different file layout"
         )
     files = m.get("files")
     if not isinstance(files, dict):
