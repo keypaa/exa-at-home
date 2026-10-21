@@ -105,3 +105,34 @@ keep the claim and quietly re-define the metric. The right move was to
 publish the negative result, and to plan the experiment that could
 overturn it (a bigger, human-judged eval). A learning repo that only
 contains positive results is a marketing artifact.
+
+## 13. A metric can punish a component for doing its job — change the query, not the metric
+
+The cross-encoder was on trial for two days: it "lost" 11 points of exact-id
+recall (0.4015 → 0.2885), so it looked like dead weight. Then we asked the
+obvious question nobody had asked: **what kind of query were we judging it
+with?** Document prefixes (200 chars of a page) and URL slugs — neither is a
+question, and MiniLM-L6 is trained on question→passage.
+
+E3 (50 real questions, known target pages) reversed the reading: recall@10
+identical (0.740 = 0.740), MRR better for the reranker (0.641 → 0.712), no
+degradations. On questions it promotes the right page to #1; on prefixes it
+demotes the embedding-space neighbour. Both results were true; the query
+type explained the difference. The fix was not a better model — it was a
+better *question*.
+
+Corollary: when a component measures badly, check whether the measurement is
+in the component's domain before you cut it.
+
+## 14. Pre-register the decision rule, not just the experiment
+
+E3's rule was written into `WORKPLAN.md` before the numbers existed: win →
+keep, tie → drop to a flag, lose → drop. That mattered twice. It stopped us
+from arguing the tie away ("+0.07 MRR is clearly something"), and it stopped
+us from cherry-picking a metric after the fact. The rule fired on MRR, so
+the reranker stayed — with the effect size and the p-value (0.18, not
+significant) recorded next to it. A rule written after the data is not a
+rule, it is a rationalisation.
+
+Corollary: "not significant" is a result, not a failure. It says: we cannot
+claim this yet, and here is the sample size that would.
