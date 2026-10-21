@@ -16,7 +16,7 @@ plausible-sounding claim in chat.
 | 5 | **Corrected measurements** (M5f relevance eval) | done | coarse 0.350 vs reranked 0.380 (n=10, noise) |
 | 6 | Cleanup wave 4: dead code, duplication, config, tests | done | 108 Python + 28 Rust tests green, ruff clean, CI green; behaviour change limited to the `top_k`→`n_coarse` rename (a loud error, not a silent alias) |
 | 7 | Cleanup wave 5: docs truth pass | done | every doc number re-derived from an artifact; the historical plan is banner-marked |
-| 8 | **Decide the reranker's fate** | pending | design → measure: does it earn 33ms? (M5f says no, n=10) |
+| 8 | **Decide the reranker's fate** | done — KEEP | E3: recall@10 0.740 = 0.740, MRR 0.641 → 0.712 (p=0.18, not significant), 0 degraded. Pre-registered rule fired on MRR. M5h / LEARNINGS §13–14 |
 | 9 | 1M build | pending | needs a decision on the corpus (English-only density-ranked) and on the reranker |
 | 10 | Serving tier (`lite` vs `auto`, Exa-3.0-style) | pending | the frontier plot the reranker question demands |
 
