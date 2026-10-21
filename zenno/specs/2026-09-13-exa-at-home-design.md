@@ -1,7 +1,7 @@
 # Exa-at-Home: Web-Scale Vector Search + Low-Latency MCP — Design Spec
 
 - Date: 2026-09-13
-- Status: draft, pending user review
+- Status: implemented (M1–M5 + M6-partial); §3/§4/§5/§10 embedder lines superseded — see §11. Current plan: `WORKPLAN.md` at the repo root.
 - Path: `zenno/specs/2026-09-13-exa-at-home-design.md` (per project CLAUDE.md override)
 - Goal: reproduce Exa-style low-latency neural search at home on a single cloud box, to learn how real systems get their speed.
 
@@ -22,7 +22,7 @@ Inspired by Exa's MCP and two engineering posts:
 
 ## 3. Non-goals (for this spec)
 
-- Training our own embedding model. We use frozen `Snowflake/snowflake-arctic-embed-m-v2.0` (native MRL-256, ~99% retention, Apache-2.0; ST query prompt — verify doc-side prefix on-box). Truncation to 256 dims is a config choice, not a training run. Optional future stretch: fine-tune a Matryoshka head on our corpus to feel the truncation/recall trade-off.
+- Training our own embedding model. We use frozen `mixedbread-ai/mxbai-embed-large-v1` (MRL-256, `truncate_dim=256`, Apache-2.0, no custom modeling code). **SUPERSEDED 2026-09-14** — the original pick was `Snowflake/snowflake-arctic-embed-m-v2.0`, which proved unloadable (hard xformers assert); see §11. Truncation to 256 dims is a config choice, not a training run. Optional future stretch: fine-tune a Matryoshka head on our corpus to feel the truncation/recall trade-off.
 - Web-scale billions of docs, live crawling, freshness pipelines, safety filtering, auth/billing/QPS hardening. Single-box, static-slice, learning build.
 - GPU-first ANN (cuVS/CAGRA). Deliberately CPU-first for ANN to stay faithful to Exa; GPU is reserved for query embedding + rerank.
 
@@ -34,7 +34,7 @@ Five online stages with strict budgets summing under 100ms p50:
 query → [embed 5–10ms, GPU] → [ANN retrieve 10–20ms, Rust CPU] → [filter/fuse, Rust/Python] → [rerank 20–40ms, GPU] → [extract/snippets, Python]
 ```
 
-- Ingest (offline): Common Crawl WET slice → clean text → Arctic-m embed (native 256 dims) → binary quant → IVF assignment → Parquet shards + inverted filter index + float store (rerank) + content store.
+- Ingest (offline): Common Crawl WET slice → clean text → mxbai embed (native 256 dims, MRL) → binary quant → IVF assignment → Parquet shards + inverted filter index + float store (rerank) + content store.
 - Serve (online): Python MCP server + Canon-lite DAG orchestrator fans out to persistent GPU embedder (no cold loads), Rust ANN core (FFI/Unix socket), cross-encoder reranker (top ~200 → top 10), content store for `contents`.
 - Instrumentation: every stage emits timing spans from day one. The latency waterfall is a first-class output.
 
@@ -47,7 +47,7 @@ Capacity sanity: 5M docs × 256 bits ≈ 160MB binary matrix; full-precision flo
 | # | Component | Lang / where | Job | Interface |
 |---|-----------|--------------|-----|-----------|
 | 1 | Ingester | Python, offline | WET files → text extraction → clean JSONL (WARC+Trafilatura is a documented upgrade) | WET paths in → `docs.jsonl` (id, url, title, text, date) out |
-| 2 | Embedder | Python + GPU, offline + online | Frozen Arctic-m-v2.0, native MRL-256, ST query prompt (verify doc prefix on-box); bulk offline, persistent-model single-query online | texts in → float32[256] out |
+| 2 | Embedder | Python + GPU, offline + online | Frozen mxbai-embed-large-v1, native MRL-256, ST query prompt (doc prefix still to verify on-box); bulk offline, persistent-model single-query online | texts in → float32[256] out |
 | 3 | ANN core | Rust, online (built offline) | Binary-quantized IVF: 1-bit/dim, ~10–30k K-means centroids for 5M docs, length-4 subvector LUT dot-product scoring, top-k over routed clusters | query vec + nprobe in → candidate ids + coarse scores out |
 | 4 | Filter index | Rust, alongside ANN | Inverted index (domain/date/keyword), applied during cluster scan (Exa's graph-vs-IVF filtering argument) | filter expr in → allowed-doc bitset out |
 | 5 | Reranker | Python + GPU, online | Cross-encoder over top ~200 → top 10, from stored full-precision vectors/text; recovers quant recall loss | candidate ids + query in → ranked top-10 out |
@@ -119,7 +119,7 @@ Namespaced `home_*` to avoid confusion with real Exa tools in the same client.
 ## 10. Milestones (build order)
 
 1. Ingester + content store on a tiny WET sample (Tier 0/1).
-2. Embedder wiring (Arctic-m-v2.0, native MRL-256) — cloud.
+2. Embedder wiring (mxbai-embed-large-v1, native MRL-256) — cloud.
 3. ANN core M1→M4 with recall harness + benches.
 4. Filter index + in-scan filtering.
 5. Reranker (M5) + degraded fallback.

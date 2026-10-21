@@ -36,12 +36,14 @@ cd crates/ann-core && maturin develop && cd ../..
 Three workarounds baked in from the local-toolchain investigation
 (skip 2 entirely on Python ≤3.13 — the ABI gate only bites 3.14):
 
-1. **PEP-668 systems** (externally managed Python): never `pip install`
-   system-wide. Always:
+1. **PEP-668 systems** (externally managed Python): `scripts/box_setup.sh`
+   installs system-wide with `--break-system-packages` (there is no venv
+   on the box). For a venv flow, do it manually instead:
    ```bash
    python -m venv .venv && source .venv/bin/activate
    pip install -e .[dev]
    ```
+   Never mix the two.
 2. **Python 3.14 + PyO3 0.22**: the PyO3 0.22 ABI gate rejects 3.14 unless
    forward-compat is opted in. Prefix every cargo/maturin invocation:
    ```bash
@@ -84,11 +86,13 @@ WARC→WET mapping: replace `/warc/` with `/wet/` in each segment path (sibling
 path; the full list is also published at
 `crawl-data/CC-MAIN-2026-34/wet.paths.gz` if you ever need to cross-check).
 
+**Cheap runs:** the full scan reads every row of every part file over HTTPS (~150GB for a 300-part crawl). Add `--max-parts N` (a strided sample of the part files; N must be >= `--limit-wet`) to cut the transfer proportionally.
+
 Slice sizes (researched, locked): **1M ≈ top-130 WET (~8GB)**;
-**5M ≈ top-620 WET (~38GB)**; toy = 4 WET (~10k docs).
+**5M ≈ top-620 WET (~38GB)**; toy = 4 WET (**~81k docs as measured on the box** — the ~10k figure predates the density-ranked slice and the dedup fixes).
 
 ```bash
-# toy slice (4 WET, ~10k docs) — density-ranked via the columnar fix above
+# toy slice (4 WET, ~81k docs) — density-ranked via the columnar fix above
 python scripts/select_slice.py --crawl CC-MAIN-2026-34 --lang eng \
     --limit-wet 4 --out wet_urls.txt && cat wet_urls.txt
 # (unranked fallback if DuckDB/HTTPS ever fails: first-N from wet.paths.gz,
@@ -143,7 +147,7 @@ grep -v -i -E 'robotstxt|crawldiagnostics' docs.jsonl > docs.clean.jsonl
 python -c "import json; seen=set(); out=open('docs.dedup.jsonl','w');
 [seen.add(d['url']) or out.write(l) for l in open('docs.clean.jsonl')
  for d in [json.loads(l)] if d['url'] not in seen]"
-mv docs.dedup.jsonl docs.jsonl && wc -l docs.jsonl   # toy: ~10k
+mv docs.dedup.jsonl docs.jsonl && wc -l docs.jsonl   # toy: ~81k
 
 # 3b. embed bulk: docs.jsonl -> vecs.npy + ids.json (mxbai, MRL-256)
 python - <<'EOF'

@@ -1,5 +1,16 @@
 # Exa-at-Home Implementation Plan
 
+> **Status: HISTORICAL PLAN (2026-09-13).** It is a record of the design as
+> it was decided then, not the current instructions — several steps are
+> superseded: embedder → `mxbai-embed-large-v1` (spec §11); ground truth
+> → the `--queries` aligned path (never `--nq`, which scores 0.0000 by
+> construction); slice selection → an explicit per-file list (directory
+> globs 404 on CloudFront); toy size → ~81k docs, not ~10k; the density
+> ranking lives in `scripts/select_slice.py` and the toy pipeline still
+> uses the unranked first-N path. **Execute `docs/RUNBOOK.md` and
+> `WORKPLAN.md`, not the steps below.**
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build a CPU-first, Exa-faithful neural search + MCP system (`home_search`, `home_contents`) that serves 1–5M Common Crawl pages at p50 < 100ms on a single cloud box, with every optimization landed as a measured before/after experiment.

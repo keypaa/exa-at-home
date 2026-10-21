@@ -1,10 +1,10 @@
 # tests/test_e2e_tier0.py (Task 12)
 """Tier-0 e2e latency: synth 500-doc index via existing pieces.
 
-Offline note (same contract as test_orch.py): ann_core is not importable in
-this sandbox (no maturin/PyPI), so the ANN backend is an injected numpy
-fake with the exact search() shape. The cloud_only real-budget test
-(--ann ivf, budget 100ms) runs on the cloud box later.
+Note: the Tier-0 ANN tests need `ann_core` built (`maturin develop`);
+the fake backend here mirrors its search() shape so the harness can run
+without the Rust extension. The cloud_only real-budget test (--ann ivf,
+budget 100ms) runs on the cloud box.
 """
 
 import subprocess
