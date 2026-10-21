@@ -13,8 +13,8 @@ comes next, and what it is ultimately for.
 Concretely, that means four things, and all four have to be true:
 
 1. **It works.** The full funnel (embed → binary IVF → rerank → snippet) over
-   1M+ real Common Crawl pages, served over MCP, at a p50 inside the 100ms
-   budget.
+   **5M** real Common Crawl pages (1M is the milestone, 5M the headline,
+   10M a stretch), served over MCP, at a p50 inside the 100ms budget.
 2. **Every decision is measured.** No design choice in the code exists
    because it felt right. Each has a row in `EXPERIMENTS.md` and a
    measurement in `runs.jsonl` that someone else can re-run.
@@ -58,11 +58,15 @@ those is a place the design can break, and every break is a lesson.
 
 Two sub-goals, in order:
 
-1. **Make the long run safe.** The embed stage is currently all-or-nothing
-   (memmap, then `os.replace` at the end). A 1M embed is ~37 minutes of
-   continuous GPU; if it dies, the work is gone. Chunk it and make it
-   resumable — the same "attended, incremental, committable" pattern the
-   molab rules demand.
+1. **Make the embed path fast and safe.** Two problems, one place:
+   - *Slow*: we run fp32 weights (1.3GB) with sentence-transformers'
+     **default batch of 32**, and we never told it the sequence length — so
+     442 docs/s uses ~3GB of a 96GB GPU. fp16/bf16 + a real batch
+     (1024+) + length bucketing should buy 4–8×, which is what moves 5M
+     from "3 hours" to "half an hour".
+   - *Fragile*: the stage is all-or-nothing (memmap, then `os.replace` at
+     the end). A 1M embed is ~37 minutes of continuous GPU; if it dies, the
+     work is gone. Chunk it and make it resumable.
 2. **Build it with a written plan** — one session, one paste, pre-registered
    acceptance criteria, the way E3 was run.
 
@@ -82,7 +86,7 @@ visible rather than assumed.
 | 1 | Resumable chunked embed + chunked centroid training | Makes a 37-min GPU run survivable on a box that can vanish | small |
 | 2 | The 1M session plan (written, like E3's) | One paste, no improvisation; pre-registered acceptance criteria | ~1h of my time, then ~1.5h attended box time |
 | 3 | 1M build + gate + sweep | The scale experiment itself | box time |
-| 4 | **Set the recall threshold** | The README claims "below-threshold recall fails CI" — no threshold is set and no CI step runs it. Either wire it or delete the claim | small |
+| 4 | **The four gates** (ANN fidelity, answer coverage, latency, relevance) | "Valid recall" means a thresholded, repeatable check. WORKPLAN.md now defines all four with toy baselines and pre-registered drop budgets; they still need implementing as one command | small |
 | 5 | A relevance metric that scales | Our id-overlap metric is not a quality metric (LEARNINGS §4/§13). The human-judged eval is n=50 and doesn't scale — this is the next *instrument* we need | medium |
 | 6 | The serving tier (`lite` / `auto`) | The Exa-3.0 mirror: coarse-only vs coarse+rerank, one switch, one measured frontier. D1 just made this concrete: both paths are now validated | medium |
 | 7 | The MCP server as a real product | It starts now (`python -m exa_home.mcp_server`) but has never been benchmarked against the real index | small-medium |
@@ -98,7 +102,9 @@ embedder, so the binary codes lose less).
 
 Web-scale (billions), GPU ANN, live crawling, freshness pipelines,
 auth/billing/multi-tenancy, a UI, and training our own foundation
-embedding model. All of these are explicitly out of scope (spec §3) —
+embedding model. The scale ladder stops at what one 32 GiB / RTX Pro 6000
+box can hold: **1M → 5M → 10M**, and 20M is out on RAM and disk, not on
+the GPU. All of these are explicitly out of scope (spec §3) —
 saying so here is what keeps the project from expanding into a
 twelve-month programme we never finish.
 
