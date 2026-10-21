@@ -99,6 +99,23 @@ pub fn load(index_dir: &Path) -> Result<FilterIdx, String> {
     })
 }
 
+/// Normalize a domain query value exactly the way scripts/build_filter.py
+/// does when it indexes the domains facet.
+///
+/// The builder (`domain_of()`) lowercases the hostname and then strips a
+/// leading "www." — so the stored key is the bare lowercase host. The
+/// query side has to do the same, or `domains=["Example.COM"]` matches
+/// nothing and the filter silently returns an empty result set (while
+/// `terms=["UPPER"]` works, because the terms facet was already
+/// lowercased on the query side).
+fn normalize_domain(domain: &str) -> String {
+    let lower = domain.to_lowercase();
+    match lower.strip_prefix("www.") {
+        Some(bare) => bare.to_string(),
+        None => lower,
+    }
+}
+
 /// Single-valued facets (domains, months): a doc holds one value, so
 /// multiple values disjoin (OR). Unknown values match nothing and are
 /// skipped (empty OR = empty).
@@ -150,7 +167,10 @@ impl FilterIdx {
             })
         }
         if let Some(ds) = &expr.domains {
-            acc = and(acc, or_keys(&self.domains, ds)?);
+            // Lookup is normalized: build_filter indexes lowercase hosts
+            // with a leading "www." stripped.
+            let norm: Vec<String> = ds.iter().map(|d| normalize_domain(d)).collect();
+            acc = and(acc, or_keys(&self.domains, &norm)?);
         }
         if let Some((lo, hi)) = &expr.month_range {
             let months: Vec<String> = self
@@ -336,6 +356,40 @@ mod tests {
         // Empty expression = no filtering.
         assert!(f.resolve(&FilterExpr::default()).unwrap().is_none());
         // Unknown keys match nothing, not an error.
+        let e = FilterExpr {
+            domains: Some(vec!["nope.example".into()]),
+            ..Default::default()
+        };
+        assert!(f.resolve(&e).unwrap().unwrap().is_empty());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn domain_lookup_is_case_insensitive_and_strips_www() {
+        // scripts/build_filter.py indexes lowercased hostnames with a
+        // leading "www." stripped (domain_of(): host.lower() then
+        // removeprefix("www.")).  The query side must normalize exactly
+        // the same way, or "Example.COM" silently matches nothing.
+        let dir = fixture_dir("domains");
+        let f = load(&dir).unwrap();
+        for q in [
+            "example.com",       // already normalized
+            "EXAMPLE.COM",       // upper case
+            "Example.Com",       // mixed case
+            "www.example.com",   // leading www.
+            "WWW.Example.COM",   // both
+        ] {
+            let e = FilterExpr {
+                domains: Some(vec![q.into()]),
+                ..Default::default()
+            };
+            assert_eq!(
+                sorted(&f.resolve(&e).unwrap().unwrap()),
+                vec![0, 2],
+                "domain query {q:?} must match the indexed example.com"
+            );
+        }
+        // A domain that is genuinely unknown still matches nothing.
         let e = FilterExpr {
             domains: Some(vec!["nope.example".into()]),
             ..Default::default()

@@ -39,6 +39,10 @@ import time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
+# The ONE home of the recall@10 formula (scripts/measure_recall.py). The
+# import follows the sys.path bootstrap above, hence the noqa.
+from scripts.measure_recall import recall_at_10 as _recall_at_10  # noqa: E402
+
 
 def _timestamp() -> str:
     import datetime

@@ -27,9 +27,10 @@ BASE = "https://data.commoncrawl.org"
 PARTS_URL = "https://data.commoncrawl.org/crawl-data/{crawl}/cc-index-table.paths.gz"
 
 # Locked SQL (verbatim WHERE/GROUP BY): rank WARC segments by English-doc
-# density so the slice needs only the densest files. eng-variant LIKEs are
-# the language gate (V1 is eng-only; --lang accepts nothing else).
-# {files} is a SQL list literal of explicit HTTPS part URLs — never a glob.
+# density so the slice needs only the densest files. The eng-variant LIKEs
+# are the language gate (V1 is eng-only; --lang accepts nothing else).
+# {lang} is that gate's language code, {files} is a SQL list literal of
+# explicit HTTPS part URLs — never a glob, {lim} the LIMIT.
 SQL = """
 SELECT warc_filename, COUNT(*) AS n_eng FROM read_parquet(
   [{files}],
@@ -37,10 +38,10 @@ SELECT warc_filename, COUNT(*) AS n_eng FROM read_parquet(
 WHERE subset = 'warc'
   AND fetch_status = 200
   AND content_mime_detected IN ('text/html', 'application/xhtml+xml')
-  AND (content_languages = 'eng'
-    OR content_languages LIKE 'eng,%'
-    OR content_languages LIKE '%,eng'
-    OR content_languages LIKE '%,eng,%')
+  AND (content_languages = '{lang}'
+    OR content_languages LIKE '{lang},%'
+    OR content_languages LIKE '%,{lang}'
+    OR content_languages LIKE '%,{lang},%')
 GROUP BY warc_filename
 ORDER BY n_eng DESC
 LIMIT {lim}
@@ -85,9 +86,12 @@ def sample_parts(parts: list[str], max_parts: int | None) -> list[str]:
     return parts[::stride][:max_parts]
 
 
-def render_sql(files: list[str], crawl: str = CRAWL, limit_wet: int = 4) -> str:
+def render_sql(files: list[str], limit_wet: int = 4, lang: str = "eng") -> str:
+    """The density query for `files`, gated on `lang` (the eng-variant
+    LIKEs). `lang` defaults to the locked 'eng'; the CLI accepts nothing
+    else, so the rendered SQL is the locked one byte for byte."""
     lit = ", ".join(f"'{u}'" for u in files)
-    return SQL.format(files=lit, crawl=crawl, lim=limit_wet)
+    return SQL.format(files=lit, lang=lang, lim=limit_wet)
 
 
 def warc_to_wet(warc_filename: str) -> str:
@@ -107,29 +111,35 @@ def to_urls(rows: list[tuple]) -> list[str]:
 
 
 def main(
-    crawl: str, limit_wet: int, out: str, max_parts: int | None = None
+    crawl: str,
+    limit_wet: int,
+    out: str,
+    max_parts: int | None = None,
+    lang: str = "eng",
 ) -> list[str]:
     import duckdb  # cloud-only import: needs network + DuckDB HTTPS support
 
     parts = fetch_part_paths(crawl)
     scanned = sample_parts(parts, max_parts)
-    urls = parts_to_urls(scanned)
-    if not urls:
+    part_urls = parts_to_urls(scanned)
+    if not part_urls:
         raise ValueError(f"{crawl}: no subset=warc parts in {PARTS_URL}")
-    if len(urls) < limit_wet:
+    if len(part_urls) < limit_wet:
         raise ValueError(
-            f"max-parts={max_parts} sampled {len(urls)} parts, fewer than the "
-            f"{limit_wet} WET files requested — raise --max-parts"
+            f"max-parts={max_parts} sampled {len(part_urls)} parts, fewer than "
+            f"the {limit_wet} WET files requested — raise --max-parts"
         )
     con = duckdb.connect()
     con.execute("SET http_retries = 100")
-    rows = con.execute(render_sql(urls, crawl, limit_wet)).fetchall()
+    rows = con.execute(render_sql(part_urls, limit_wet=limit_wet, lang=lang)).fetchall()
     urls = to_urls(rows)
     with open(out, "w") as f:
         f.writelines(u + "\n" for u in urls)
+    # The SCANNED count is the number of part files DuckDB actually read
+    # (the strided sample), not the number of WET URLs it returned.
     print(
         f"{len(urls)} WET URLs -> {out} (crawl {crawl}, "
-        f"scanned {len(urls)} of {len(parts)} parts)"
+        f"scanned {len(scanned)} of {len(parts)} parts)"
     )
     return urls
 
@@ -141,7 +151,8 @@ if __name__ == "__main__":
         "--lang",
         default="eng",
         choices=["eng"],
-        help="V1 is eng-only (locked); the SQL LIKEs are the gate.",
+        help="V1 is eng-only (locked); the SQL LIKEs are the gate. The flag "
+        "is threaded into the SQL template (render_sql(..., lang=...)).",
     )
     ap.add_argument("--limit-wet", type=int, default=4)
     ap.add_argument("--out", default="wet_urls.txt")
@@ -153,4 +164,4 @@ if __name__ == "__main__":
         "must be >= --limit-wet). Omit for the full 300-part scan.",
     )
     a = ap.parse_args()
-    main(a.crawl, a.limit_wet, a.out, a.max_parts)
+    main(a.crawl, a.limit_wet, a.out, a.max_parts, a.lang)
