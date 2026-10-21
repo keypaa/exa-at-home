@@ -1,0 +1,27 @@
+{
+  "meta": {
+    "judge": "LLM (Claude) as relevance judge",
+    "date": "2026-10-21",
+    "eval_set": "eval/review_toy_20261021.json",
+    "corpus": "toy 81k Common Crawl (CC-MAIN-2026-34, unranked slice), top_coarse=50, nprobe=8, max_pair_tokens=64, batch=32",
+    "rubric": "A result is RELEVANT (1) if the page's main subject is the subject the query names — i.e. a user issuing this query would find the page on-topic for it. Same-domain pages count (e.g. any Windows/Microsoft-version or Windows-update page for a Windows query; any legal-service or legal-procedure page for a 'lawyer in <city>' query; any woodworking tool/material page for a woodworking query). Unrelated, off-language-but-off-topic, spam, portal index and garbage-binary pages are 0. The query text is a URL slug, so 'the subject the query names' is read from the slug.",
+    "known_limits": [
+      "n=10 queries, 20 judgements each (100 per system) - a 1-2 result difference is noise.",
+      "LLM judge, not human; no inter-annotator agreement measured.",
+      "Topic-level relevance, not answer-level: a page can be on-topic without containing the specific answer."
+    ],
+    "bits_order": "per query, the 20 characters are in review.jsonl file order (the shuffled A/B presentation order); 'A' slots are the coarse ANN top-10, 'B' slots the MiniLM-L6 reranked top-10."
+  },
+  "labels": {
+    "0": "00000000000000000000",
+    "1": "10001000000001110000",
+    "2": "11111111111111111111",
+    "3": "10100110011111000001",
+    "4": "00000000000000000000",
+    "5": "01000000000000010000",
+    "6": "00000010001110011011",
+    "7": "00111111111111101111",
+    "8": "11000111010001000011",
+    "9": "00000001000000000001"
+  }
+}
