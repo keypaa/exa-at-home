@@ -24,6 +24,7 @@ from exa_home.config import (
     CENTROID_SAMPLE,
     DOWNLOAD_WORKERS,
     EMBED_BATCH,
+    EMBED_CHUNK,
     K_TOY,
 )
 
@@ -188,7 +189,8 @@ def stage_embed(
     docs_path: str,
     vecs_path: str,
     ids_path: str,
-    batch: int = 256,
+    batch: int = EMBED_BATCH,
+    chunk: int = EMBED_CHUNK,
     force: bool = False,
     verbose: bool = False,
     show_progress: bool = False,
@@ -229,7 +231,7 @@ def stage_embed(
     def flush(texts: list[str], ids: list[str]) -> None:
         """Embed one chunk into the memmap + append its ids."""
         nonlocal mm, rows, ids_written, dim, dtype
-        vecs = emb.encode_docs(texts)
+        vecs = emb.encode_docs(texts, batch_size=batch)
         if mm is None:
             dim = int(vecs.shape[1])
             dtype = vecs.dtype
@@ -255,7 +257,7 @@ def stage_embed(
             for d in read_jsonl(docs_path):
                 chunk_texts.append(d["text"][:12000])
                 chunk_ids.append(d["id"])
-                if len(chunk_texts) < batch:
+                if len(chunk_texts) < chunk:
                     continue
                 flush(chunk_texts, chunk_ids)
                 chunk_texts, chunk_ids = [], []
@@ -500,7 +502,14 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument(
         "--workers", type=int, default=DOWNLOAD_WORKERS, help="download workers"
     )
-    ap.add_argument("--batch", type=int, default=EMBED_BATCH, help="embed batch size")
+    ap.add_argument(
+        "--batch", type=int, default=EMBED_BATCH,
+        help="GPU batch size for bulk embedding",
+    )
+    ap.add_argument(
+        "--chunk", type=int, default=EMBED_CHUNK,
+        help="docs held in RAM per flush (streaming boundary)",
+    )
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("ingest", help="WET dir -> docs.jsonl")
@@ -514,7 +523,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--ids", required=True)
     p.set_defaults(
         fn=lambda a: stage_embed(
-            a.docs, a.out, a.ids, a.batch, a.force, a.verbose, a.verbose
+            a.docs, a.out, a.ids, a.batch, a.chunk, a.force, a.verbose, a.verbose
         )
     )
 

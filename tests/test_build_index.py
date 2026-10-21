@@ -341,10 +341,12 @@ def test_stage_embed_streams_the_corpus(tmp_path, monkeypatch):
     corpus_bytes = dpath.stat().st_size
 
     calls: list[int] = []
+    gpu_batches: list[int | None] = []
 
     class FakeEmbedder:
-        def encode_docs(self, texts):
+        def encode_docs(self, texts, batch_size=None):
             calls.append(len(texts))
+            gpu_batches.append(batch_size)
             import numpy as np
 
             return np.zeros((len(texts), 256), dtype=np.float32)
@@ -356,7 +358,7 @@ def test_stage_embed_streams_the_corpus(tmp_path, monkeypatch):
     tracemalloc.start()
     try:
         shape, dtype = stage_embed(
-            str(dpath), str(vpath), str(ipath), batch=32, verbose=False
+            str(dpath), str(vpath), str(ipath), batch=32, chunk=32, verbose=False
         )
         _current, peak = tracemalloc.get_traced_memory()
     finally:
@@ -364,9 +366,13 @@ def test_stage_embed_streams_the_corpus(tmp_path, monkeypatch):
 
     assert shape == (n, 256)
     assert dtype == "float32"
-    # Chunked: the encoder never sees more than `batch` docs at once.
+    # Chunked: the encoder never sees more than `chunk` docs at once
+    # (the RAM streaming boundary) ...
     assert calls and max(calls) <= 32
     assert sum(calls) == n
+    # ... and the GPU batch is passed through separately (it is what the
+    # model actually sees per forward pass).
+    assert gpu_batches and all(b == 32 for b in gpu_batches)
     # The corpus is never materialised: the peak stays far below the
     # corpus size (the old code held every doc dict -> several x the
     # corpus in RAM).

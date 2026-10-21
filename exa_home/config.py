@@ -36,7 +36,13 @@ K_TOY = 1024
 K_1M = 10_000
 K_5M = 30_000
 CENTROID_SAMPLE = 500_000
-EMBED_BATCH = 256
+# GPU batch for bulk document embedding. sentence-transformers' own
+# default is 32 — on a 96GB GPU that used ~3GB and 442 docs/s (M8).
+EMBED_BATCH = 1024
+# Documents held in RAM per flush (the corpus is streamed, never loaded
+# whole); independent of the GPU batch so length bucketing can see a
+# large enough slice to be worth sorting.
+EMBED_CHUNK = 8192
 MAX_TERMS = 50_000
 DOWNLOAD_WORKERS = 16
 SHARD_COUNT = 64
