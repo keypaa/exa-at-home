@@ -39,6 +39,13 @@ Funnel principle: expensive full-precision work touches ~200 docs, never 5M.
 reranker re-reads text from the content store (byte-offset index makes
 those seeks O(1)).
 
+**Every knob lives in one place:** [`exa_home/config.py`](exa_home/config.py)
+holds the operating point (`nprobe 8, top_coarse 50, max_pair_tokens 64,
+batch_size 32, budget 100ms`), the model names, the K values and the
+crawl. The library, the scripts, the notebook and the MCP server all read
+it — which is how the shipped tool is prevented from drifting away from
+the configuration we actually measured.
+
 ## Layout
 
 ```

@@ -14,7 +14,7 @@ plausible-sounding claim in chat.
 | 3 | Fix wave 2: serving path (timeouts, store, filters) | done | regression tests per bug |
 | 4 | Fix wave 3: pipeline (download corruption, dedup, streaming, p50) | done | regression tests per bug |
 | 5 | **Corrected measurements** (M5f relevance eval) | done | coarse 0.350 vs reranked 0.380 (n=10, noise) |
-| 6 | Cleanup wave 4: dead code, duplication, config, tests | done (scripts wave still landing) | 108 Python + 28 Rust tests green, ruff clean, CI green; behaviour change limited to the `top_k`→`n_coarse` rename (a loud error, not a silent alias) |
+| 6 | Cleanup wave 4: dead code, duplication, config, tests | done | 108 Python + 28 Rust tests green, ruff clean, CI green; behaviour change limited to the `top_k`→`n_coarse` rename (a loud error, not a silent alias) |
 | 7 | Cleanup wave 5: docs truth pass | done | every doc number re-derived from an artifact; the historical plan is banner-marked |
 | 8 | **Decide the reranker's fate** | pending | design → measure: does it earn 33ms? (M5f says no, n=10) |
 | 9 | 1M build | pending | needs a decision on the corpus (English-only density-ranked) and on the reranker |
@@ -31,9 +31,15 @@ plausible-sounding claim in chat.
 - **D2 — the corpus.** The toy came from the unranked slice (no English
   filter, spam-heavy, multilingual). A 1M density-ranked slice is
   English-only. Toy numbers do not transfer; state this before comparing.
-- **D3 — the 1M scale blockers.** `build_filter` holds a token set per doc
-  (~50GB at 5M); `build_index` posting lists are O(n·K); `stage_ingest` holds
-  every URL. Fix before the 1M build, not during it.
+- **D3 — the 1M scale blockers.** FIXED (cleanup wave 4): the filter build
+  is now two-pass streaming with roaring postings (**111MB @50k docs vs
+  1356MB**, 21x less at 200k); posting lists use one stable argsort
+  (**9.85s → 0.11s at n=1M/K=10k**, byte-identical output); the
+  centroid-assignment transient is pinned at 200MiB (was 1.9GB at K=10k);
+  ground truth uses partition-based top-k (**777ms → 21ms @5M**, identical
+  tie order); the sweep runs each query once instead of twice. Remaining:
+  `stage_ingest`'s URL-dedup set (~660MB at 5M URLs, inherent to
+  URL-second dedup).
 
 ### D1 experiment design (E3) — question-grounded retrieval eval
 
