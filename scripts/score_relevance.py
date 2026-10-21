@@ -8,6 +8,12 @@ precision@10 for the two systems the review encodes:
     A = coarse ANN top-10          (no rerank — the "Lite" path)
     B = MiniLM-L6 reranked top-10   (the "Auto" path)
 
+This is a LABELLED precision@10 (hits out of the 10 judged entries), NOT
+the gt-intersection recall@10 of scripts/measure_recall.py: there is no
+ground-truth file in this workflow, only judge labels. The shared
+top-10 arithmetic (hits_at_10) still comes from measure_recall.py so the
+"/10" exists in exactly one place.
+
 Usage:
     python scripts/score_relevance.py \
         --review eval/review_toy_20261021.json \

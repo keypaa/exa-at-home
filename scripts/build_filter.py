@@ -33,6 +33,7 @@ import os
 import re
 import tempfile
 from collections import Counter
+from collections.abc import Iterable
 from urllib.parse import urlparse
 
 TOKEN = re.compile(r"[a-z0-9]{3,}")
@@ -61,15 +62,20 @@ def _write_postings(out_dir: str, name: str, bitmaps: dict) -> int:
     The keys are written in sorted order and the offsets table is dumped
     with sort_keys=True, so the bytes are a deterministic function of the
     postings (the Rust reader slices the blob by offset+length).
+
+    The .bin is written INCREMENTALLY: the old code built the whole blob
+    in RAM and then copied it (`bytes(blob)`) — twice the size of the
+    output (GBs at 5M docs). The bytes on disk are identical.
     """
-    blob = bytearray()
     offsets: dict[str, list[int]] = {}
-    for key in sorted(bitmaps):
-        data = bitmaps[key].serialize()
-        offsets[key] = [len(blob), len(data)]
-        blob += data
     with open(os.path.join(out_dir, name + ".bin"), "wb") as f:
-        f.write(bytes(blob))
+        pos = 0
+        for key in sorted(bitmaps):
+            data = bitmaps[key].serialize()
+            f.write(data)
+            offsets[key] = [pos, len(data)]
+            pos += len(data)
+            bitmaps[key] = None  # the bitmap is on disk now: free it
     with open(os.path.join(out_dir, name + ".json"), "w") as f:
         json.dump(offsets, f, indent=2, sort_keys=True)
     return len(offsets)
@@ -95,7 +101,7 @@ def _doc_source(docs):
         yield lambda: read_jsonl(path)
 
 
-def build(docs, out_dir: str, max_terms: int = 50_000) -> dict:
+def build(docs: Iterable[dict], out_dir: str, max_terms: int = 50_000) -> dict:
     """docs (ANY iterable of dicts) -> the filter/ files. Returns the counts.
 
     TWO streaming passes:

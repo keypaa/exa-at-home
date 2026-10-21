@@ -32,4 +32,7 @@ pythonpath = [".", "tests"]
 [tool.ruff]
 # zenno/ holds the historical design spec + plan; their embedded code
 # blocks are records of what was decided then, not code we maintain.
-extend-exclude = ["zenno/"]
+# Markdown is excluded too: `ruff format` rewrites Python inside .md
+# code fences, which would silently edit the copy-pasteable commands in
+# docs/RUNBOOK.md and eval/E3_PROTOCOL.md.
+extend-exclude = ["zenno/", "*.md"]
