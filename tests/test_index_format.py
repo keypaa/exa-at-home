@@ -61,6 +61,24 @@ def test_manifest_verify_roundtrip(tmp_path):
     assert MANIFEST not in m["files"]
 
 
+def test_manifest_carries_the_schema_and_verifier_rejects_a_mismatch(tmp_path):
+    """The layout travels with the index: a manifest written by a
+    different file layout must be rejected by the verifier, not by a
+    confusing load-time failure."""
+    _write_core_files(tmp_path)
+    write_manifest(str(tmp_path), {"dim": 256, "n_docs": 1, "n_centroids": 1})
+    m = verify_manifest(str(tmp_path))
+    assert m["schema"] == SCHEMA
+
+    # Simulate an index written with a different layout.
+    manifest_path = tmp_path / MANIFEST
+    raw = json.loads(manifest_path.read_text())
+    raw["schema"] = {**SCHEMA, "dim": 999}
+    manifest_path.write_text(json.dumps(raw))
+    with pytest.raises(ValueError, match="schema"):
+        verify_manifest(str(tmp_path))
+
+
 def test_manifest_verify_rejects_corruption(tmp_path):
     from exa_home.index_format import verify_manifest, write_manifest
 
