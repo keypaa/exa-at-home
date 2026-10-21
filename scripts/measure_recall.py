@@ -17,13 +17,10 @@ the sweep, losing every remaining grid point).
 """
 
 import argparse
-import json
 import sys
 
 
-def recall_at_10(
-    gt_rows, pred_rows, on_skip=None
-) -> tuple[float | None, int]:
+def recall_at_10(gt_rows, pred_rows, on_skip=None) -> tuple[float | None, int]:
     """recall@10 over the gt rows that HAVE a prediction.
 
     gt_rows: iterable of {"query_id": k, "top10": [ids...]}

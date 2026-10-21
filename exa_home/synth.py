@@ -96,7 +96,7 @@ class NumpyFakeANN:
     """Tier-0 ANN stand-in: exact brute-force dot over doc vectors.
 
     Same injected-backend shape as the orch tests' FakeANN
-    (`search(q, nprobe, top_k, **filters) -> (ids, scores)`), but scores are
+    (`search(q, nprobe, n_coarse, **filters) -> (ids, scores)`), but scores are
     real numpy dots so the retrieve span is representative. Filters are
     accepted and ignored (documented): the fake corpus has no filter index.
     """
@@ -105,9 +105,9 @@ class NumpyFakeANN:
         self.ids = ids
         self._mat = mat
 
-    def search(self, q, nprobe=8, top_k=200, **filters):
+    def search(self, q, nprobe=8, n_coarse=200, **filters):
         scores = self._mat @ np.asarray(q, dtype=np.float32)
-        k = min(top_k, len(self.ids))
+        k = min(n_coarse, len(self.ids))
         idx = np.argsort(scores, kind="stable")[::-1][:k]
         return [self.ids[i] for i in idx], [float(scores[i]) for i in idx]
 

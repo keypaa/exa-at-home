@@ -89,8 +89,7 @@ def _doc_source(docs):
     with tempfile.TemporaryDirectory() as tmp:
         path = os.path.join(tmp, "docs.jsonl")
         with open(path, "w", encoding="utf-8") as f:
-            for d in docs:
-                f.write(json.dumps(d) + "\n")
+            f.writelines(json.dumps(d) + "\n" for d in docs)
         from scripts.jsonl import read_jsonl
 
         yield lambda: read_jsonl(path)

@@ -50,6 +50,39 @@ fn expr_is_empty(expr: &filter::FilterExpr) -> bool {
         && expr.terms.as_ref().is_none_or(|v| v.is_empty())
 }
 
+/// Resolve the coarse-candidate count of an `IvfIndex.search` call.
+///
+/// The argument used to be called `top_k`, but in this binding it never
+/// meant "top k results": it is the number of COARSE candidates the ANN
+/// returns (e.g. 50), which the caller reranks down to its own top-k
+/// (e.g. 10). `top_k` is still accepted as a keyword only to reject it
+/// with a message that names the new argument — a silent alias would
+/// keep the trap alive (`top_k=10` would quietly return ten coarse
+/// candidates, not ten final results).
+///
+/// Returns the message on error (the caller turns it into a
+/// ValueError); kept free of PyO3 types so it stays unit-testable.
+fn resolve_n_coarse(n_coarse: Option<usize>, top_k: Option<usize>) -> Result<usize, String> {
+    match (n_coarse, top_k) {
+        (Some(n), None) => Ok(n),
+        (None, None) => Err(
+            "IvfIndex.search: n_coarse is required (the number of coarse \
+             candidates to retrieve, e.g. 50) - it used to be called top_k"
+                .into(),
+        ),
+        (None, Some(_)) => Err(
+            "IvfIndex.search: the 'top_k' argument was renamed to 'n_coarse' \
+             - in this binding it is the number of coarse candidates to \
+             retrieve (e.g. 50), not the number of final results; pass \
+             n_coarse=<value> instead"
+                .into(),
+        ),
+        (Some(_), Some(_)) => Err(
+            "IvfIndex.search: pass either n_coarse or its old name top_k, not both".into(),
+        ),
+    }
+}
+
 #[pyclass]
 struct AnnIndex {
     rows: Vec<f32>,
@@ -220,6 +253,10 @@ impl AnnIndex {
 /// query + `lut::score` per doc).
 /// `nprobe == K` scans every list, so it must equal M2 brute force
 /// (within fp reassociation).
+///
+/// `search` returns the `n_coarse` best ANN candidates (e.g. 50) — the
+/// caller reranks them down to its own top-k (e.g. 10). The argument used
+/// to be called `top_k`, which read like a result count and was not one.
 #[pyclass]
 struct IvfIndex {
     inner: index::Loaded,
@@ -234,19 +271,23 @@ impl IvfIndex {
         })
     }
 
-    #[pyo3(signature = (q, nprobe, top_k, allow=None, domains=None, month_range=None, terms=None))]
+    #[pyo3(signature = (q, nprobe, n_coarse=None, allow=None, domains=None, month_range=None, terms=None, top_k=None))]
     fn search(
         &self,
         py: Python<'_>,
         q: PyReadonlyArray1<f32>,
         nprobe: usize,
-        top_k: usize,
+        n_coarse: Option<usize>,
         allow: Option<Vec<u32>>,
         domains: Option<Vec<String>>,
         month_range: Option<(String, String)>,
         terms: Option<Vec<String>>,
+        top_k: Option<usize>,
     ) -> PyResult<(Vec<String>, Vec<f32>)> {
         let inner = &self.inner;
+        // The coarse-candidate count (was misnamed `top_k`): the number of
+        // ANN candidates to retrieve, not the number of final results.
+        let n_coarse = resolve_n_coarse(n_coarse, top_k).map_err(PyValueError::new_err)?;
         // Copy the query out BEFORE releasing the GIL (E0277, same as
         // AnnIndex::search); also gather strided input instead of panicking.
         let qv: Vec<f32> = match q.as_slice() {
@@ -340,7 +381,7 @@ impl IvfIndex {
                 &inner.codes,
                 &clusters,
                 &qv,
-                top_k,
+                n_coarse,
                 allow_slice,
             );
             Ok((
@@ -398,6 +439,23 @@ mod tests {
         assert!(check_finite_query(&q, "AnnIndex.search")
             .unwrap_err()
             .contains("not finite"));
+    }
+
+    #[test]
+    fn n_coarse_is_the_coarse_candidate_count_and_top_k_is_rejected() {
+        // The renamed argument: n_coarse is the number of COARSE
+        // candidates to retrieve (e.g. 50), not the number of final
+        // results. The old keyword is rejected with a message that names
+        // the new one — a silent alias would keep the trap alive.
+        assert_eq!(resolve_n_coarse(Some(50), None).unwrap(), 50);
+        let err = resolve_n_coarse(None, None).unwrap_err();
+        assert!(err.contains("n_coarse is required"), "{err}");
+        let err = resolve_n_coarse(None, Some(50)).unwrap_err();
+        assert!(err.contains("renamed"), "{err}");
+        assert!(err.contains("n_coarse"), "{err}");
+        assert!(err.contains("top_k"), "{err}");
+        let err = resolve_n_coarse(Some(50), Some(10)).unwrap_err();
+        assert!(err.contains("not both"), "{err}");
     }
 
     #[test]

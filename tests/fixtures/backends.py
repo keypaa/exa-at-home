@@ -25,9 +25,9 @@ class FakeANN:
         self.ids = list(ids)
         self.seen_kwargs: list[dict] = []
 
-    def search(self, q, nprobe=8, top_k=200, **filters):
+    def search(self, q, nprobe=8, n_coarse=200, **filters):
         self.seen_kwargs.append(dict(filters))
-        ids = self.ids[:top_k]
+        ids = self.ids[:n_coarse]
         return ids, [1.0 - 0.1 * i for i in range(len(ids))]
 
 

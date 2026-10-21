@@ -22,7 +22,10 @@ scripts/train_centroids.py (sklearn, cloud-only) — this script only serves
 pre-trained centroids.
 
 Centroid assignment runs in row chunks so the 5M-doc full build never
-materializes the n×K score matrix.
+materializes the n×K score matrix. The chunk size is a function of K:
+the transient chunk×K float32 score matrix stays inside CHUNK_BYTES
+(200 MiB) — the old fixed 50k-row chunk needed 0.2GB at K=1024 but 2.0GB
+at K=10k and 6.0GB at K=30k.
 """
 
 import argparse
@@ -34,7 +37,12 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-CHUNK = 50_000
+# Transient score-matrix budget: the centroid-assignment chunk (rows × K
+# float32 scores) stays inside this many bytes.
+CHUNK_BYTES = 200 * 1024 * 1024
+# Floor for the chunk size: below this, the per-chunk numpy call overhead
+# dominates (and the bound above is exceeded only for K > 50k).
+MIN_CHUNK = 1_000
 
 # Provenance sidecar: WHICH corpus an index was built from. It is NOT part
 # of the locked index layout (manifest.json keys, centroids.f32, codes.bin,
@@ -102,49 +110,56 @@ def write_source(index_dir: str, source: dict) -> None:
         json.dump(source, f, indent=2, sort_keys=True)
 
 
+def chunk_size(k: int) -> int:
+    """Rows per centroid-assignment chunk for K centroids.
+
+    The transient score matrix is chunk × K float32, so the chunk shrinks
+    as K grows: the transient stays within CHUNK_BYTES (200 MiB) unless
+    the MIN_CHUNK floor dominates (K > ~52k).
+    """
+    if k <= 0:
+        return MIN_CHUNK
+    return max(MIN_CHUNK, CHUNK_BYTES // (k * 4))
+
+
 def assign(vecs, centroids, verbose: bool = False):
     import numpy as np
 
     n = len(vecs)
     out = np.empty(n, dtype=np.int64)
-    n_chunks = (n + CHUNK - 1) // CHUNK
-    for i, s in enumerate(range(0, n, CHUNK)):
-        e = min(s + CHUNK, n)
+    chunk = chunk_size(len(centroids))
+    n_chunks = (n + chunk - 1) // chunk
+    for i, s in enumerate(range(0, n, chunk)):
+        e = min(s + chunk, n)
         out[s:e] = np.argmax(vecs[s:e] @ centroids.T, axis=1)
         if verbose and (i + 1) % max(1, n_chunks // 10) == 0:
             print(f"assign: chunk {i + 1}/{n_chunks} ({e}/{n} docs)", flush=True)
     return out
 
 
-class _DocSource:
-    """Lazy view over a docs.jsonl file: len() + iteration, no full list.
+def write_lists(path: str, assign_v, k: int, verbose: bool = False) -> None:
+    """Write lists.bin: u32 K, then per list: u32 len + len×u32 row ids (LE).
 
-    scripts/build_filter.build() needs `len(docs)` (the n_docs count) and
-    `enumerate(docs)` (the row ids) — both work with a lazy sequence, so
-    the corpus is streamed into the filter builder instead of being
-    materialised as a list of dicts (multiple GB at 5M docs).
+    ONE stable argsort of the assignment vector plus searchsorted
+    boundaries, instead of one `np.where(assign_v == c)` per cluster —
+    that scanned the WHOLE assignment array K times (O(n·K): 10.3s at
+    n=1M/K=10k vs 0.08s here).
+
+    The row ids are identical to the np.where build: the argsort is
+    stable, so within a cluster the rows keep their ascending order.
     """
+    import numpy as np
 
-    def __init__(self, path: str):
-        self.path = path
-        self._n = -1
-
-    def __len__(self) -> int:
-        if self._n < 0:
-            n = 0
-            with open(self.path, encoding="utf-8") as f:
-                for line in f:
-                    if line.strip():
-                        n += 1
-            self._n = n
-        return self._n
-
-    def __iter__(self):
-        with open(self.path, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    yield json.loads(line)
+    order = np.argsort(assign_v, kind="stable")
+    bounds = np.searchsorted(assign_v[order], np.arange(k + 1))
+    with open(path, "wb") as f:
+        f.write(struct.pack("<I", k))
+        for c in range(k):
+            rows = order[bounds[c] : bounds[c + 1]].astype("<u4")
+            f.write(struct.pack("<I", len(rows)))
+            f.write(rows.tobytes())
+            if verbose and (c + 1) % max(1, k // 10) == 0:
+                print(f"lists: {c + 1}/{k} posting lists", flush=True)
 
 
 def main(
@@ -187,52 +202,48 @@ def main(
 
     os.makedirs(out, exist_ok=True)
     if verbose:
-        print(f"assign: {n} docs -> {k} clusters (50k-row chunks)", flush=True)
+        print(
+            f"assign: {n} docs -> {k} clusters "
+            f"({chunk_size(k)} rows/chunk, {CHUNK_BYTES // (1024 * 1024)} MiB budget)",
+            flush=True,
+        )
     assign_v = assign(vecs, centroids, verbose=verbose)
 
     centroids.astype("<f4").tofile(os.path.join(out, CENTROIDS_FILE))
     pack = np.packbits((vecs > 0).astype(np.uint8), axis=1, bitorder="little")
     assert pack.shape == (n, DIM // 8), pack.shape
     pack.tofile(os.path.join(out, CODES_FILE))
-    with open(os.path.join(out, LISTS_FILE), "wb") as f:
-        f.write(struct.pack("<I", k))
-        for c in range(k):
-            rows = np.where(assign_v == c)[0].astype("<u4")
-            f.write(struct.pack("<I", len(rows)))
-            f.write(rows.tobytes())
-            if verbose and (c + 1) % max(1, k // 10) == 0:
-                print(f"lists: {c + 1}/{k} posting lists", flush=True)
+    write_lists(os.path.join(out, LISTS_FILE), assign_v, k, verbose=verbose)
     with open(os.path.join(out, DOC_IDS_FILE), "w") as f:
         json.dump(ids, f)
 
     n_stored = 0
     if not no_store:
         from exa_home.store import ContentStore
+        from scripts.jsonl import read_jsonl
 
         store_dir = store or os.path.join(out, "store")
         cs = ContentStore(store_dir)
         # Track offsets during the bulk write so no rescan is needed:
         # save_index() persists store/offsets.json for O(1) cold gets.
         cs.begin_bulk()
-        with open(docs_path, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    cs.put(json.loads(line))
-                    n_stored += 1
-                    if verbose and n_stored % 100_000 == 0:
-                        print(f"store: {n_stored} docs", flush=True)
+        for d in read_jsonl(docs_path):
+            cs.put(d)
+            n_stored += 1
+            if verbose and n_stored % 100_000 == 0:
+                print(f"store: {n_stored} docs", flush=True)
         if n_stored != n:
             raise ValueError(f"{docs_path}: {n_stored} docs vs {n} vecs")
         cs.save_index()
 
     if filter:
         from scripts.build_filter import build as build_filter
+        from scripts.jsonl import JsonlFile
 
         # Streamed: the docs are handed over one at a time (the old code
         # built the whole list first — GBs of text as Python dicts at 5M
         # docs). The filter layout is unchanged.
-        build_filter(_DocSource(docs_path), os.path.join(out, "filter"), max_terms)
+        build_filter(JsonlFile(docs_path), os.path.join(out, "filter"), max_terms)
 
     # Manifest LAST so filter/ + store shards are covered by verify.
     # The provenance sidecar is written after it (and any stale copy is

@@ -120,7 +120,7 @@ def test_ivf_exact_routing_matches_bruteforce(tmp_path):
     ids = _write_ivf_index(tmp_path, vecs, k=8)
     idx = IvfIndex.load(str(tmp_path))
     q = vecs[0]
-    got_ids, got_scores = idx.search(q, nprobe=8, top_k=10)
+    got_ids, got_scores = idx.search(q, nprobe=8, n_coarse=10)
     pack = np.packbits((vecs > 0).astype(np.uint8), axis=1, bitorder="little")
     ref = AnnIndex.from_binary(pack, ids)
     want_ids, want_scores = ref.search_binary(q, top_k=10)
@@ -138,7 +138,7 @@ def test_ivf_search_allow_list_filters(tmp_path):
     _write_ivf_index(tmp_path, vecs, k=4)
     idx = IvfIndex.load(str(tmp_path))
     allow = [7, 1, 5]  # deliberately unsorted: Rust sorts once per query
-    got_ids, _ = idx.search(vecs[10], nprobe=4, top_k=10, allow=allow)
+    got_ids, _ = idx.search(vecs[10], nprobe=4, n_coarse=10, allow=allow)
     assert sorted(got_ids) == ["d1", "d5", "d7"]
 
 
@@ -194,7 +194,7 @@ def test_m4_scores_match_m2(tmp_path):
     ids = _write_ivf_index(tmp_path, vecs, k=8)
     idx = IvfIndex.load(str(tmp_path))
     q = vecs[0]
-    got_ids, got_scores = idx.search(q, nprobe=8, top_k=10)
+    got_ids, got_scores = idx.search(q, nprobe=8, n_coarse=10)
     pack = np.packbits((vecs > 0).astype(np.uint8), axis=1, bitorder="little")
     want = np.array(
         [
@@ -245,7 +245,7 @@ def test_direct_coarse_recall_bounds_reversed_skew(tmp_path):
     for i in rng.choice(len(vecs), size=50, replace=False):
         q = vecs[i]
         want = set(np.argsort(-np.where(bits, q, -q).sum(axis=1), kind="stable")[:10])
-        got, _ = idx.search(q, nprobe=8, top_k=50)
+        got, _ = idx.search(q, nprobe=8, n_coarse=50)
         rows = [int(g[1:]) for g in got]  # "d123" -> 123 (ids are row-order)
         direct.append(len(set(rows[:10]) & want) / 10)
         # MockReranker reverses the full 50-candidate list: its top-10 is
@@ -347,13 +347,13 @@ def test_filter_domains_restricts_results(tmp_path):
     _write_ivf_index_with_filter(tmp_path, vecs, 2, FILTER_DOCS)
     idx = IvfIndex.load(str(tmp_path))
     q = vecs[0]
-    all_ids, _ = idx.search(q, nprobe=2, top_k=10)
+    all_ids, _ = idx.search(q, nprobe=2, n_coarse=10)
     assert set(all_ids) == {"d0", "d1", "d2"}
-    dom_ids, _ = idx.search(q, nprobe=2, top_k=10, domains=["example.com"])
+    dom_ids, _ = idx.search(q, nprobe=2, n_coarse=10, domains=["example.com"])
     assert set(dom_ids) <= set(all_ids)
     assert set(dom_ids) == {"d0", "d2"}
     # Unknown domain matches nothing (empty, not an error).
-    assert idx.search(q, nprobe=2, top_k=10, domains=["nope.example"])[0] == []
+    assert idx.search(q, nprobe=2, n_coarse=10, domains=["nope.example"])[0] == []
 
 
 def test_filter_month_range_and_terms(tmp_path):
@@ -363,24 +363,26 @@ def test_filter_month_range_and_terms(tmp_path):
     _write_ivf_index_with_filter(tmp_path, vecs, 2, FILTER_DOCS)
     idx = IvfIndex.load(str(tmp_path))
     q = vecs[0]
-    jan, _ = idx.search(q, nprobe=2, top_k=10, month_range=("2026-01", "2026-01"))
+    jan, _ = idx.search(q, nprobe=2, n_coarse=10, month_range=("2026-01", "2026-01"))
     assert set(jan) == {"d0", "d2"}
-    feb, _ = idx.search(q, nprobe=2, top_k=10, month_range=("2026-02", "2026-02"))
+    feb, _ = idx.search(q, nprobe=2, n_coarse=10, month_range=("2026-02", "2026-02"))
     assert set(feb) == {"d1"}
-    wide, _ = idx.search(q, nprobe=2, top_k=10, month_range=("2026-01", "2026-02"))
+    wide, _ = idx.search(q, nprobe=2, n_coarse=10, month_range=("2026-01", "2026-02"))
     assert set(wide) == {"d0", "d1", "d2"}
     # Terms conjoin (AND); lookup is case-insensitive like the index keys.
-    one, _ = idx.search(q, nprobe=2, top_k=10, terms=["ALPHA"])
+    one, _ = idx.search(q, nprobe=2, n_coarse=10, terms=["ALPHA"])
     assert set(one) == {"d0", "d1"}
-    two, _ = idx.search(q, nprobe=2, top_k=10, terms=["alpha", "beta"])
+    two, _ = idx.search(q, nprobe=2, n_coarse=10, terms=["alpha", "beta"])
     assert set(two) == {"d0"}
     # Dimensions conjoin: domain AND term.
     both, _ = idx.search(
-        q, nprobe=2, top_k=10, domains=["example.com"], terms=["alpha"]
+        q, nprobe=2, n_coarse=10, domains=["example.com"], terms=["alpha"]
     )
     assert set(both) == {"d0"}
     # Explicit allow-list composes with filter bitsets (intersection).
-    combo, _ = idx.search(q, nprobe=2, top_k=10, allow=[0, 1], domains=["example.com"])
+    combo, _ = idx.search(
+        q, nprobe=2, n_coarse=10, allow=[0, 1], domains=["example.com"]
+    )
     assert set(combo) == {"d0"}
 
 
@@ -391,4 +393,4 @@ def test_filter_kwargs_without_filter_dir_raise(tmp_path):
     _write_ivf_index(tmp_path, vecs, 2)  # no filter/ subdir
     idx = IvfIndex.load(str(tmp_path))
     with pytest.raises(Exception, match="filter"):
-        idx.search(vecs[0], nprobe=2, top_k=10, domains=["example.com"])
+        idx.search(vecs[0], nprobe=2, n_coarse=10, domains=["example.com"])

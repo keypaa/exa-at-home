@@ -28,7 +28,11 @@ pub fn route(centroids: &[f32], k: usize, dim: usize, q: &[f32], nprobe: usize) 
 /// `codes` is n×32 row-major packed rows; `lists` holds per-cluster row
 /// ids. `allow`, when present, must be sorted ascending and is enforced by
 /// binary search (the binding sorts once per query). Returns (row id,
-/// score) pairs sorted best-first, truncated to `top_k`.
+/// score) pairs sorted best-first, truncated to `n_coarse`.
+///
+/// `n_coarse` is the number of COARSE candidates to keep (e.g. 50): the
+/// caller reranks those down to its own top-k. It is not a result count —
+/// which is why the binding calls it `n_coarse` and not `top_k`.
 ///
 /// M4: one 64×16 LUT is built per query (`lut::build`) and each doc is
 /// scored with 64 nibble-gather lookups (`lut::score`) instead of the naive
@@ -42,7 +46,7 @@ pub fn search_lists(
     codes: &[[u8; 32]],
     cluster_ids: &[u32],
     q: &[f32],
-    top_k: usize,
+    n_coarse: usize,
     allow: Option<&[u32]>,
 ) -> Vec<(u32, f32)> {
     let table: Option<[[f32; 16]; 64]> = match q.try_into() {
@@ -65,7 +69,7 @@ pub fn search_lists(
         }
     }
     scored.sort_by(|a, b| crate::cmp_desc(a.1, b.1));
-    scored.truncate(top_k);
+    scored.truncate(n_coarse);
     scored
 }
 

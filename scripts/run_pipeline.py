@@ -22,9 +22,24 @@ import time
 
 WET_PATHS_URL = "https://data.commoncrawl.org/crawl-data/{crawl}/wet.paths.gz"
 BASE = "https://data.commoncrawl.org"
-# Absolute script path: stage subprocesses must not depend on the CWD
-# (notebook kernels run at the workspace root, not the repo).
-_HERE = os.path.dirname(os.path.abspath(__file__))
+# The WET file naming: Common Crawl ships `*.warc.wet.gz` (the sibling of
+# the WARC segment) and `*.wet.gz`. ONE place, so the stages that COUNT
+# the WET files and the stage that INGESTS them cannot drift apart.
+WET_GLOBS = ("*.warc.wet.gz", "*.wet.gz")
+
+
+def wet_files(wet_dir: str) -> list[str]:
+    """Every WET file in `wet_dir` (both naming conventions), sorted.
+
+    A `*.warc.wet.gz` file matches BOTH patterns, so the result is
+    de-duplicated: the old `glob + glob` count counted such files twice
+    and could then skip a download whose files were still missing.
+    """
+    seen: dict[str, None] = {}
+    for pattern in WET_GLOBS:
+        for path in glob.glob(os.path.join(wet_dir, pattern)):
+            seen.setdefault(path, None)
+    return sorted(seen)
 
 
 def _log(stage: str, t0: float, extra: str = "") -> None:
@@ -78,10 +93,7 @@ def stage_download(
     with open(urls_file) as f:
         urls = [line.strip() for line in f if line.strip()]
     if not force and os.path.isdir(out_dir):
-        have = len(
-            glob.glob(os.path.join(out_dir, "*.warc.wet.gz"))
-            + glob.glob(os.path.join(out_dir, "*.wet.gz"))
-        )
+        have = len(wet_files(out_dir))
         if have >= len(urls):
             if verbose:
                 print(f"[download] reusing {out_dir} ({have} files)", flush=True)
@@ -108,11 +120,7 @@ def stage_ingest(
         return {"docs": n, "reused": True}
 
     def all_docs():
-        pats = [
-            os.path.join(wet_dir, "*.warc.wet.gz"),
-            os.path.join(wet_dir, "*.wet.gz"),
-        ]
-        files = sorted(f for p in pats for f in glob.glob(p))
+        files = wet_files(wet_dir)
         if verbose:
             print(f"[ingest] {len(files)} WET files", flush=True)
         for p in files:
@@ -123,21 +131,19 @@ def stage_ingest(
     # URL-second dedup + subset exclusion (digest-first is in write_docs_jsonl).
     import re
 
+    from scripts.jsonl import read_jsonl
+
     rx = re.compile(r"robotstxt|crawldiagnostics", re.IGNORECASE)
     seen: set[str] = set()
     kept = 0
     excluded = 0
     dup_urls = 0
-    with (
-        open(tmp, encoding="utf-8") as fin,
-        open(docs_path, "w", encoding="utf-8") as fout,
-    ):
-        for line in fin:
+    with open(docs_path, "w", encoding="utf-8") as fout:
+        for d in read_jsonl(tmp):
             # The exclusion applies to the URL (and an optional `subset`
             # field) — NEVER to the whole JSON line: the line carries the
             # page TEXT, so a page whose body merely mentions robots.txt
             # was silently dropped from the corpus.
-            d = json.loads(line)
             url = d.get("url", "")
             subset = d.get("subset", "")
             if rx.search(url) or (subset and rx.search(subset)):
@@ -147,7 +153,7 @@ def stage_ingest(
                 dup_urls += 1
                 continue
             seen.add(url)
-            fout.write(line)
+            fout.write(json.dumps(d) + "\n")
             kept += 1
             if verbose and kept % 100_000 == 0:
                 print(f"[ingest] url-dedup: {kept}", flush=True)
@@ -233,18 +239,13 @@ def stage_embed(
             ids_written += 1
 
     try:
-        with (
-            open(docs_path, encoding="utf-8") as fin,
-            open(tmp_ids, "w", encoding="utf-8") as fid,
-        ):
+        from scripts.jsonl import read_jsonl
+
+        with open(tmp_ids, "w", encoding="utf-8") as fid:
             fid.write("[")
             chunk_texts: list[str] = []
             chunk_ids: list[str] = []
-            for line in fin:
-                line = line.strip()
-                if not line:
-                    continue
-                d = json.loads(line)
+            for d in read_jsonl(docs_path):
                 chunk_texts.append(d["text"][:12000])
                 chunk_ids.append(d["id"])
                 if len(chunk_texts) < batch:
@@ -347,6 +348,7 @@ def stage_queries(
     gt_path: str = "gt.jsonl",
     force: bool = False,
     verbose: bool = False,
+    embedder=None,
 ) -> dict:
     """docs/vecs/ids -> q.jsonl + gt.jsonl (gate queries + ground truth).
 
@@ -355,18 +357,26 @@ def stage_queries(
     those exact texts — gt query k is always pred query k. The old
     --nq random-vector path is never used here (different query sets
     score recall@10 = 0.0000 by construction).
-    """
-    import subprocess
 
+    The ground truth is computed IN-PROCESS (scripts.ground_truth is
+    imported, not shelled out): one interpreter instead of two, and the
+    stage becomes testable without a subprocess.
+
+    `embedder`: injectable query embedder (default: the real one) so the
+    Tier-0 suite can build a ground truth without loading a 335M-param
+    model.
+    """
     t0 = time.perf_counter()
     if _skip(queries_path, force) and _skip(gt_path, force):
         if verbose:
             print(f"[queries] reusing {queries_path} + {gt_path}", flush=True)
         return {"reused": True}
+    from scripts.ground_truth import ground_truth
+    from scripts.jsonl import read_jsonl
+
     # Only the first `nq` docs are needed: read them and stop. The old code
     # materialised the WHOLE corpus as a list of dicts to use docs[:nq].
-    with open(docs_path, encoding="utf-8") as f:
-        docs = [json.loads(line) for line in itertools.islice(f, nq)]
+    docs = list(itertools.islice(read_jsonl(docs_path), nq))
     if len(docs) < nq:
         print(
             f"[queries] warning: corpus has only {len(docs)} docs, {nq} requested",
@@ -375,21 +385,7 @@ def stage_queries(
         )
     with open(queries_path, "w") as f:
         f.writelines(json.dumps({"query": d["text"][:200]}) + "\n" for d in docs)
-    subprocess.run(
-        [
-            sys.executable,
-            os.path.join(_HERE, "ground_truth.py"),
-            "--vecs",
-            vecs_path,
-            "--ids",
-            ids_path,
-            "--queries",
-            queries_path,
-            "--out",
-            gt_path,
-        ],
-        check=True,
-    )
+    ground_truth(vecs_path, ids_path, gt_path, queries=queries_path, embedder=embedder)
     _log("queries", t0, f" ({nq} queries -> {queries_path}, {gt_path})")
     return {"nq": nq}
 

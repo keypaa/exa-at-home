@@ -382,6 +382,12 @@ def test_stage_queries_stops_after_nq(tmp_path, monkeypatch):
     """stage_queries needs only the first nq docs — it must not read them all."""
     import scripts.run_pipeline as pipe
 
+    class _FakeEmbedder:
+        """No model: the ground truth must be buildable in Tier-0."""
+
+        def encode_queries(self, texts):
+            return np.zeros((len(texts), 256), dtype=np.float32)
+
     n = 500
     docs = make_docs(n, seed=6)
     dpath = tmp_path / "docs.jsonl"
@@ -395,22 +401,33 @@ def test_stage_queries_stops_after_nq(tmp_path, monkeypatch):
         return real_loads(s, *a, **kw)
 
     monkeypatch.setattr(pipe.json, "loads", counting_loads)
-    monkeypatch.setattr("subprocess.run", lambda *a, **kw: None)
+
+    # stage_queries now calls the ground-truth builder IN-PROCESS (no
+    # subprocess), so the vectors it needs must exist for real.
+    vpath = tmp_path / "vecs.npy"
+    ipath = tmp_path / "ids.json"
+    np.save(vpath, make_vectors(n, seed=6))
+    ipath.write_text(json.dumps([d["id"] for d in docs]))
 
     qpath = tmp_path / "q.jsonl"
     gtpath = tmp_path / "gt.jsonl"
     pipe.stage_queries(
         str(dpath),
-        str(tmp_path / "vecs.npy"),
-        str(tmp_path / "ids.json"),
+        str(vpath),
+        str(ipath),
         5,
         queries_path=str(qpath),
         gt_path=str(gtpath),
+        embedder=_FakeEmbedder(),
     )
 
     assert len(qpath.read_text().splitlines()) == 5
-    # Only the first 5 docs were parsed — the other 495 were never read.
-    assert len(parsed) == 5
+    # Only the first 5 DOCS were parsed — the other 495 were never read.
+    # (The ground truth now runs in-process, so the query file and the
+    # ids file are parsed too; count the document parses specifically.)
+    doc_parses = [s for s in parsed if '"text"' in s]
+    assert len(doc_parses) == 5
+    assert all(f'"doc-{i}"' in s for i, s in enumerate(doc_parses))
 
 
 def test_select_slice_sql_locked_content():

@@ -49,17 +49,14 @@ def pct(xs, p):
 
 
 def load_queries(path: str) -> list[dict]:
+    from scripts.jsonl import read_jsonl
+
     out = []
-    with open(path, encoding="utf-8") as f:
-        for ln, line in enumerate(f, 1):
-            line = line.strip()
-            if not line:
-                continue
-            d = json.loads(line)
-            q = d.get("query", d.get("text", ""))
-            if not q:
-                raise ValueError(f"{path}:{ln}: query line needs a 'query' key")
-            out.append({"query": q, "filters": d.get("filters") or {}})
+    for d in read_jsonl(path):
+        q = d.get("query", d.get("text", ""))
+        if not q:
+            raise ValueError(f"{path}: query line needs a 'query' key")
+        out.append({"query": q, "filters": d.get("filters") or {}})
     if not out:
         raise ValueError(f"{path}: no queries found")
     return out
@@ -129,7 +126,13 @@ def build_real_dag(
 
 
 def run_latency(dag, queries: list[dict], k: int, verbose: bool = False) -> dict:
-    """Run every query with profile=True; collect per-stage ms + totals."""
+    """Run every query with profile=True; collect per-stage ms + totals.
+
+    The per-query result ids are collected IN THE SAME PASS (stats
+    ["top_ids"]): the knob grid used to run every query a second time
+    just to build its predictions, doubling the GPU/CPU time of every
+    sweep.
+    """
     import time
 
     from exa_home.orch import run_search
@@ -139,6 +142,7 @@ def run_latency(dag, queries: list[dict], k: int, verbose: bool = False) -> dict
     breakdown: dict = {s: [] for s in BREAKDOWN_KEYS}
     totals: list[float] = []
     violations: list[tuple] = []
+    top_ids: list[list[str]] = []
     for i, q in enumerate(queries):
         res = run_search(dag, q["query"], q.get("filters"), top_k=k, profile=True)
         prof = res["profile"]
@@ -152,6 +156,7 @@ def run_latency(dag, queries: list[dict], k: int, verbose: bool = False) -> dict
         for s in BREAKDOWN_KEYS:
             breakdown[s].append(prof.get(s, 0.0))
         totals.append(wall)
+        top_ids.append([r["id"] for r in res["results"]])
         if verbose and (i + 1) % max(1, len(queries) // 10) == 0:
             el = time.perf_counter() - t_run
             print(
@@ -171,6 +176,7 @@ def run_latency(dag, queries: list[dict], k: int, verbose: bool = False) -> dict
         "total": totals,
         "violations": violations,
         "n": len(queries),
+        "top_ids": top_ids,
     }
 
 

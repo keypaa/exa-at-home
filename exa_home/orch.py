@@ -241,7 +241,9 @@ def build_search_dag(
         parts = x.get("_parts")
         if parts is not None:
             parts["filter_translate_ms"] = (time.perf_counter() - t0) * 1000
-        ids, scores = ann.search(x["embed"], nprobe=nprobe, top_k=top_coarse, **filters)
+        ids, scores = ann.search(
+            x["embed"], nprobe=nprobe, n_coarse=top_coarse, **filters
+        )
         return [{"id": i, "coarse_score": float(s)} for i, s in zip(ids, scores)]
 
     def rerank_fn(x):

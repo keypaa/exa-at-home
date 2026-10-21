@@ -34,6 +34,8 @@ def _load_json(path: str):
 
 
 def score(review: list[dict], labels: dict) -> dict:
+    from scripts.measure_recall import hits_at_10
+
     per_query, per_system = [], {k: [] for k, _ in SYSTEMS}
     for s in review:
         qid = str(s["qid"])
@@ -49,8 +51,8 @@ def score(review: list[dict], labels: dict) -> dict:
         row = {"qid": s["qid"], "query": s["query"]}
         for key, _name in SYSTEMS:
             hits = sum(int(bits[n]) for n, e in enumerate(entries) if e["label"] == key)
-            per_system[key].append(hits / 10)
-            row[key] = hits / 10
+            per_system[key].append(hits_at_10(hits))
+            row[key] = hits_at_10(hits)
         per_query.append(row)
     return {"per_query": per_query, "per_system": per_system}
 

@@ -42,10 +42,31 @@ fn err(msg: String) -> PyErr {
     PyValueError::new_err(msg)
 }
 
+/// Chunk size for hashing: files are read in 8 KiB pieces, so verifying a
+/// 78 MB shard costs 8 KiB of buffer instead of 78 MB of RAM.
+const HASH_CHUNK: usize = 8 * 1024;
+
+/// sha256 of a file, streamed.
+///
+/// The manifest covers every index file, and the biggest ones are tens of
+/// megabytes — `fs::read` would pull each whole file into RAM just to
+/// hash it. This reads the file in HASH_CHUNK pieces instead.
 fn sha256_file(path: &Path) -> std::io::Result<String> {
-    let bytes = fs::read(path)?;
+    let file = fs::File::open(path)?;
+    sha256_reader(std::io::BufReader::with_capacity(HASH_CHUNK, file))
+}
+
+/// sha256 of a stream, read in HASH_CHUNK pieces (never all at once).
+fn sha256_reader<R: std::io::Read>(mut reader: R) -> std::io::Result<String> {
     let mut h = Sha256::new();
-    h.update(&bytes);
+    let mut buf = vec![0u8; HASH_CHUNK];
+    loop {
+        let n = reader.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        h.update(&buf[..n]);
+    }
     Ok(format!("{:x}", h.finalize()))
 }
 
@@ -318,6 +339,7 @@ pub fn load_py(dir: &str) -> PyResult<Loaded> {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+    use std::io::Read;
 
     /// Write a minimal valid index/ dir by hand (mirrors the Python test
     /// helper `_write_ivf_index`): K=2 centroids on the x-axis, 4 docs with
@@ -376,6 +398,66 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         write_fixture(&dir);
         dir
+    }
+
+    #[test]
+    fn sha256_file_streams_in_chunks_and_matches_the_whole_file_digest() {
+        // Hashing must not pull the whole file into RAM: a 78 MB shard
+        // should cost one chunk of buffer, not 78 MB. The counting reader
+        // records the biggest single read that was asked for.
+        struct Counting {
+            data: Vec<u8>,
+            pos: usize,
+            max_req: usize,
+            total: usize,
+        }
+        impl Read for Counting {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                self.max_req = self.max_req.max(buf.len());
+                let n = (self.data.len() - self.pos).min(buf.len());
+                buf[..n].copy_from_slice(&self.data[self.pos..self.pos + n]);
+                self.pos += n;
+                self.total += n;
+                Ok(n)
+            }
+        }
+        let data: Vec<u8> = (0..(HASH_CHUNK * 3 + 12345)).map(|i| (i % 251) as u8).collect();
+        let mut counter = Counting {
+            data: data.clone(),
+            pos: 0,
+            max_req: 0,
+            total: 0,
+        };
+        let got = sha256_reader(&mut counter).unwrap();
+        // Reference digest: the whole content hashed in one go.
+        let mut h = Sha256::new();
+        h.update(&data);
+        assert_eq!(got, format!("{:x}", h.finalize()));
+        // No single read asked for more than one chunk, and every byte
+        // was read exactly once.
+        assert!(
+            counter.max_req <= HASH_CHUNK,
+            "read {} bytes at once, expected at most {HASH_CHUNK}",
+            counter.max_req
+        );
+        assert_eq!(counter.total, data.len());
+
+        // The file entry point agrees with the stream entry point.
+        let dir = std::env::temp_dir().join("ann-core-ivf-test-sha");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("big.bin");
+        fs::write(&path, &data).unwrap();
+        assert_eq!(sha256_file(&path).unwrap(), got);
+        // An empty file hashes to the empty digest.
+        let empty = dir.join("empty.bin");
+        fs::write(&empty, b"").unwrap();
+        let h = Sha256::new();
+        assert_eq!(
+            sha256_file(&empty).unwrap(),
+            format!("{:x}", h.finalize())
+        );
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

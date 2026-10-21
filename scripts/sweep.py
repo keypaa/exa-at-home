@@ -39,9 +39,8 @@ import time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-# The ONE home of the recall@10 formula (scripts/measure_recall.py). The
-# import follows the sys.path bootstrap above, hence the noqa.
-from scripts.measure_recall import recall_at_10 as _recall_at_10  # noqa: E402
+# The ONE home of the recall@10 formula (scripts/measure_recall.py).
+from scripts.measure_recall import recall_at_10 as _recall_at_10
 
 
 def _timestamp() -> str:
@@ -98,32 +97,6 @@ def build_real_backends(
     }
 
 
-def _recall_at_10(
-    gt_rows: list[dict], pred_rows: list[dict]
-) -> tuple[float | None, int]:
-    """recall@10 over the gt rows that HAVE a prediction.
-
-    A gt row without a prediction is SKIPPED (and counted), never indexed
-    blind: `pr[g["query_id"]]` used to raise a bare KeyError and abort the
-    sweep, losing every remaining grid point. Mirrors
-    scripts/measure_recall.py, which skips + reports the same way.
-
-    Returns (recall, skipped); recall is None when nothing is comparable.
-    """
-    pr = {r["query_id"]: r["top10"] for r in pred_rows}
-    recs: list[float] = []
-    skipped = 0
-    for g in gt_rows:
-        top10 = pr.get(g["query_id"])
-        if top10 is None:
-            skipped += 1
-            continue
-        recs.append(len(set(g["top10"]) & set(top10)) / 10)
-    if not recs:
-        return None, skipped
-    return sum(recs) / len(recs), skipped
-
-
 def run_grid(
     backends: dict,
     queries: list[dict],
@@ -139,7 +112,7 @@ def run_grid(
     batch_sizes: list[int] | None = None,
 ) -> list[dict]:
     """Run the full grid. Returns the ledger rows (also appended to file)."""
-    from exa_home.orch import build_search_dag, run_search
+    from exa_home.orch import build_search_dag
     from scripts.e2e_latency import append_ledger, pct, run_latency
 
     os.makedirs(out_dir, exist_ok=True)
@@ -196,13 +169,16 @@ def run_grid(
             top_coarse=c["top_coarse"],
             nprobe=c["nprobe"],
         )
+        # ONE pass over the query set per grid point: run_latency collects
+        # the per-query result ids on the way, so the predictions are the
+        # ids of the very same searches that were timed. (The old code ran
+        # every query TWICE per grid point — once for the latency, once
+        # for the predictions — doubling the GPU/CPU time of every sweep.)
         stats = run_latency(dag, queries, k=k)
-        pred_rows = []
-        for qid, q in enumerate(queries):
-            res = run_search(dag, q["query"], q.get("filters"), top_k=k)
-            pred_rows.append(
-                {"query_id": qid, "top10": [r["id"] for r in res["results"]]}
-            )
+        pred_rows = [
+            {"query_id": qid, "top10": top10}
+            for qid, top10 in enumerate(stats["top_ids"])
+        ]
         with open(os.path.join(out_dir, f"pred_{slug}.jsonl"), "w") as f:
             f.writelines(json.dumps(r) + "\n" for r in pred_rows)
         recall, skipped = _recall_at_10(gt_rows, pred_rows) if gt_rows else (None, 0)
@@ -279,8 +255,9 @@ def main(argv: list[str] | None = None) -> int:
         backends = build_real_backends(a.index, None, a.max_query_tokens)
         queries = load_queries(a.queries)
         if a.gt:
-            with open(a.gt) as f:
-                gt_rows = [json.loads(line) for line in f]
+            from scripts.jsonl import read_jsonl
+
+            gt_rows = list(read_jsonl(a.gt))
         else:
             gt_rows = None
     logger.info(
