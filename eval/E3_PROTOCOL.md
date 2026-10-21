@@ -152,8 +152,10 @@ try:
         got, _ = ann.search(qv[i], nprobe=K, n_coarse=10)
         ceil += len(exact & {pos[g] for g in got if g in pos}) / 10
     print(f"binary ceiling (nprobe=K={K}, full scan vs exact float): {ceil/n:.3f}")
-    print(f"  routing loss vs quantization loss: {c_hit/n:.3f} @ nprobe=8 "
-          f"vs {ceil/n:.3f} at the ceiling")
+    print("  NOTE: two different metrics — the ceiling is ID-AGREEMENT with")
+    print("  brute-force float search (what the binary codes can represent),")
+    print("  while the recall above is TARGET-DOC recall (did we find the page")
+    print("  the question was about). They are not comparable.")
 except Exception as e:
     print(f"(ceiling measurement skipped: {e})")
 
