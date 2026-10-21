@@ -114,7 +114,7 @@ K = json.load(open(f"{ROOT}/index/manifest.json"))["n_centroids"]
 rows = []
 for i, q in enumerate(Q):
     vec, tgt = qv[i], q["target_id"]
-    c50, _ = ann.search(vec, nprobe=8, top_k=50)
+    c50, _ = ann.search(vec, nprobe=8, n_coarse=50)
     texts = [(store.get(c) or {}).get("text", "")[:2000] for c in c50]
     ranked, deg = rr.rerank(q["question"],
                             [{"id": c, "text": t} for c, t in zip(c50, texts)])
@@ -149,7 +149,7 @@ try:
     for i in range(n):
         scores = np.asarray(vecs) @ qv[i]
         exact = set(np.argsort(-scores, kind="stable")[:10].tolist())
-        got, _ = ann.search(qv[i], nprobe=K, top_k=10)
+        got, _ = ann.search(qv[i], nprobe=K, n_coarse=10)
         ceil += len(exact & {pos[g] for g in got if g in pos}) / 10
     print(f"binary ceiling (nprobe=K={K}, full scan vs exact float): {ceil/n:.3f}")
     print(f"  routing loss vs quantization loss: {c_hit/n:.3f} @ nprobe=8 "
