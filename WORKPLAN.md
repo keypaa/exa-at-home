@@ -14,8 +14,8 @@ plausible-sounding claim in chat.
 | 3 | Fix wave 2: serving path (timeouts, store, filters) | done | regression tests per bug |
 | 4 | Fix wave 3: pipeline (download corruption, dedup, streaming, p50) | done | regression tests per bug |
 | 5 | **Corrected measurements** (M5f relevance eval) | done | coarse 0.350 vs reranked 0.380 (n=10, noise) |
-| 6 | Cleanup wave 4: dead code, duplication, config, tests | in progress | 116 tests stay green; LOC down; no behaviour change |
-| 7 | Cleanup wave 5: docs truth pass | pending | every doc number re-derived from an artifact |
+| 6 | Cleanup wave 4: dead code, duplication, config, tests | done (scripts wave still landing) | 108 Python + 28 Rust tests green, ruff clean, CI green; behaviour change limited to the `top_k`→`n_coarse` rename (a loud error, not a silent alias) |
+| 7 | Cleanup wave 5: docs truth pass | done | every doc number re-derived from an artifact; the historical plan is banner-marked |
 | 8 | **Decide the reranker's fate** | pending | design → measure: does it earn 33ms? (M5f says no, n=10) |
 | 9 | 1M build | pending | needs a decision on the corpus (English-only density-ranked) and on the reranker |
 | 10 | Serving tier (`lite` vs `auto`, Exa-3.0-style) | pending | the frontier plot the reranker question demands |
