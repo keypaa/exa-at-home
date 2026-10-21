@@ -35,6 +35,54 @@ plausible-sounding claim in chat.
   (~50GB at 5M); `build_index` posting lists are O(n·K); `stage_ingest` holds
   every URL. Fix before the 1M build, not during it.
 
+### D1 experiment design (E3) — question-grounded retrieval eval
+
+**The hypothesis being tested.** The cross-encoder is trained on
+question→passage (MS MARCO). Every query we have ever measured it with was
+NOT a question: 200-char document prefixes (the sweep) or URL slugs (M5f).
+If the reranker is evaluated out of its training distribution, then "it
+loses 11 points of exact-id recall" may be an artifact of the *queries*,
+not a property of the model. E3 removes that confound.
+
+**The design.**
+- 50 (query, target document) pairs. The target document is sampled from
+  the corpus; the query is a *question* written about that document's
+  content (grounded, natural language, in-distribution for the reranker).
+- The question set is written once and committed as an artifact
+  (`eval/questions_*.json`), so the experiment is reproducible and
+  re-runnable by anyone.
+- Metric: **target-document recall@10** (is the page the question was
+  written about in the top-10?) and **MRR of the target**, coarse vs
+  reranked, same 50-candidate pool, paired per query.
+- Secondary (optional, human): topical labels on the non-target results —
+  that is where a reranker can show a difference the target metric cannot.
+
+**Why this design and not a bigger sweep.**
+- A bigger sweep of the same metric cannot settle it: the effect to resolve
+  is ~3 points, and at n=10 queries a sign test has no power.
+- The paired design removes query-difficulty variance: every query goes to
+  both systems, so win/loss/tally is a direct comparison.
+- The target-document metric has a known correct answer, so it needs no
+  human labels to be unambiguous.
+- It tests the actual hypothesis (query distribution) instead of
+  re-measuring the known result.
+
+**Decision rule — fixed BEFORE running, to avoid moving the goalposts.**
+- E3 shows the reranker winning on target recall@10 or MRR → **keep it**
+  (option b); the lesson is "the metric and the query type were wrong", and
+  the serving default stays as measured.
+- E3 shows a tie → **drop it from the default path** (option a) and expose
+  it as an opt-in flag: it costs 33ms and no measurement supports it.
+- E3 shows the reranker losing → **drop it** (option a). The project
+  becomes a pure binary-IVF engine: ~14ms p50, 0.40 exact-id recall, one
+  less moving part. That is a legitimate outcome, not a failure.
+- A win **only for question-like queries** (option c, a "deep" tier) is a
+  third possible answer and would justify keeping the model behind a
+  quality tier.
+
+**Cost.** ~30 min to write the 50 questions (once, reusable), ~5 min of box
+time; the eval reuses the existing sweep/serve machinery.
+
 **Measurement discipline**
 
 - Every gate/sweep run appends to `runs.jsonl` with the **full config**
