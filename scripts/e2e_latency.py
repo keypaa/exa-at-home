@@ -22,6 +22,8 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
+from exa_home.config import OPERATING_POINT
+
 # Spec §7 profile keys from run_search (filter_ms is the measured
 # translate time; the in-scan intersect stays inside ann_ms, so filter
 # is excluded from the waterfall sum — integrity check unchanged).
@@ -274,12 +276,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--synth-docs", type=int, default=500)
     ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--k", type=int, default=10)
-    ap.add_argument("--budget-ms", type=float, default=100.0)
+    ap.add_argument("--k", type=int, default=OPERATING_POINT["k"])
+    ap.add_argument("--budget-ms", type=float, default=OPERATING_POINT["budget_ms"])
     ap.add_argument("--embedder", choices=["hash", "arctic", "real"], default="hash")
     ap.add_argument("--reranker", choices=["mock", "real"], default="mock")
-    ap.add_argument("--nprobe", type=int, default=8)
-    ap.add_argument("--top-coarse", type=int, default=200)
+    ap.add_argument("--nprobe", type=int, default=OPERATING_POINT["nprobe"])
+    ap.add_argument("--top-coarse", type=int, default=OPERATING_POINT["top_coarse"])
     ap.add_argument(
         "--max-pair-tokens",
         type=int,

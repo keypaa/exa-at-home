@@ -15,6 +15,8 @@ import time
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
+from exa_home.config import DOWNLOAD_WORKERS
+
 RETRIES = 5
 BACKOFF_S = 2.0
 
@@ -121,6 +123,6 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--urls", required=True, help="wet_urls.txt from select_slice.py")
     ap.add_argument("--out", default="data/wet/")
-    ap.add_argument("--workers", type=int, default=16)
+    ap.add_argument("--workers", type=int, default=DOWNLOAD_WORKERS)
     a = ap.parse_args()
     main(a.urls, a.out, a.workers)

@@ -20,6 +20,13 @@ import os
 import sys
 import time
 
+from exa_home.config import (
+    CENTROID_SAMPLE,
+    DOWNLOAD_WORKERS,
+    EMBED_BATCH,
+    K_TOY,
+)
+
 WET_PATHS_URL = "https://data.commoncrawl.org/crawl-data/{crawl}/wet.paths.gz"
 BASE = "https://data.commoncrawl.org"
 # The WET file naming: Common Crawl ships `*.warc.wet.gz` (the sibling of
@@ -280,7 +287,7 @@ def stage_index(
     docs_path: str,
     out: str,
     k: int,
-    sample: int = 500_000,
+    sample: int = CENTROID_SAMPLE,
     use_filter: bool = True,
     force: bool = False,
     verbose: bool = False,
@@ -413,7 +420,7 @@ def cmd_toy(a) -> int:
         "ids.json",
         "docs.jsonl",
         "index/",
-        k=1024,
+        k=K_TOY,
         use_filter=True,
         force=a.force,
         verbose=a.verbose,
@@ -490,8 +497,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--force", action="store_true", help="redo stages even if outputs exist"
     )
     ap.add_argument("--verbose", action="store_true", help="per-stage progress output")
-    ap.add_argument("--workers", type=int, default=16, help="download workers")
-    ap.add_argument("--batch", type=int, default=256, help="embed batch size")
+    ap.add_argument(
+        "--workers", type=int, default=DOWNLOAD_WORKERS, help="download workers"
+    )
+    ap.add_argument("--batch", type=int, default=EMBED_BATCH, help="embed batch size")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("ingest", help="WET dir -> docs.jsonl")

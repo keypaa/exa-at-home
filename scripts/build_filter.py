@@ -36,6 +36,8 @@ from collections import Counter
 from collections.abc import Iterable
 from urllib.parse import urlparse
 
+from exa_home.config import MAX_TERMS
+
 TOKEN = re.compile(r"[a-z0-9]{3,}")
 MONTH = re.compile(r"^(\d{4})-(0[1-9]|1[0-2])")
 
@@ -179,6 +181,6 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--docs", required=True)
     ap.add_argument("--out", required=True)
-    ap.add_argument("--max-terms", type=int, default=50_000)
+    ap.add_argument("--max-terms", type=int, default=MAX_TERMS)
     a = ap.parse_args()
     main(a.docs, a.out, a.max_terms)

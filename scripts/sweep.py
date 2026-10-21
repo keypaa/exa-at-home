@@ -39,6 +39,8 @@ import time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
+from exa_home.config import OPERATING_POINT
+
 # The ONE home of the recall@10 formula (scripts/measure_recall.py).
 from scripts.measure_recall import recall_at_10 as _recall_at_10
 
@@ -210,12 +212,23 @@ def run_grid(
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--nprobe", type=int, nargs="+", default=[8])
-    ap.add_argument("--top-coarse", type=int, nargs="+", default=[50])
-    ap.add_argument("--max-pair-tokens", type=int, nargs="+", default=[64])
-    ap.add_argument("--batch-size", type=int, nargs="+", default=[32])
-    ap.add_argument("--k", type=int, default=10)
-    ap.add_argument("--budget-ms", type=float, default=100.0)
+    ap.add_argument(
+        "--nprobe", type=int, nargs="+", default=[OPERATING_POINT["nprobe"]]
+    )
+    ap.add_argument(
+        "--top-coarse", type=int, nargs="+", default=[OPERATING_POINT["top_coarse"]]
+    )
+    ap.add_argument(
+        "--max-pair-tokens",
+        type=int,
+        nargs="+",
+        default=[OPERATING_POINT["max_pair_tokens"]],
+    )
+    ap.add_argument(
+        "--batch-size", type=int, nargs="+", default=[OPERATING_POINT["batch_size"]]
+    )
+    ap.add_argument("--k", type=int, default=OPERATING_POINT["k"])
+    ap.add_argument("--budget-ms", type=float, default=OPERATING_POINT["budget_ms"])
     ap.add_argument("--out", default="sweeps/")
     ap.add_argument("--ledger", default="runs.jsonl")
     ap.add_argument("--synth-docs", type=int, default=0)
@@ -224,7 +237,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--index", default=None)
     ap.add_argument("--queries", default=None)
     ap.add_argument("--gt", default=None)
-    ap.add_argument("--max-query-tokens", type=int, default=32)
+    ap.add_argument(
+        "--max-query-tokens", type=int, default=OPERATING_POINT["max_query_tokens"]
+    )
     a = ap.parse_args(argv)
 
     out_dir = fresh_out_dir(a.out)

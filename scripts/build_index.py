@@ -37,6 +37,8 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
+from exa_home.config import CRAWL, MAX_TERMS
+
 # Transient score-matrix budget: the centroid-assignment chunk (rows × K
 # float32 scores) stays inside this many bytes.
 CHUNK_BYTES = 200 * 1024 * 1024
@@ -279,8 +281,8 @@ if __name__ == "__main__":
         action="store_true",
         help="also build index/filter/ (needs pyroaring)",
     )
-    ap.add_argument("--max-terms", type=int, default=50_000)
-    ap.add_argument("--crawl", default="CC-MAIN-2026-34")
+    ap.add_argument("--max-terms", type=int, default=MAX_TERMS)
+    ap.add_argument("--crawl", default=CRAWL)
     ap.add_argument(
         "--verbose",
         action="store_true",
