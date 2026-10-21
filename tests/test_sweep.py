@@ -92,6 +92,63 @@ def test_cli_help_lists_grid_flags():
         assert flag in r.stdout, flag
 
 
+def test_recall_skips_gt_rows_without_predictions():
+    """A gt row with no prediction is SKIPPED, not a KeyError.
+
+    The old `_recall_at_10` indexed `pr[g["query_id"]]` blind: a sweep with
+    fewer predictions than gt rows raised a bare KeyError and lost every
+    remaining grid point. scripts/measure_recall.py already skips + reports.
+    """
+    from scripts.sweep import _recall_at_10
+
+    gt_rows = [
+        {"query_id": 0, "top10": [f"d{i}" for i in range(10)]},
+        {"query_id": 1, "top10": [f"e{i}" for i in range(10)]},
+    ]
+    pred_rows = [{"query_id": 0, "top10": [f"d{i}" for i in range(10)]}]
+    recall, skipped = _recall_at_10(gt_rows, pred_rows)
+    assert skipped == 1
+    assert recall == 1.0  # the one comparable query is a perfect hit
+    # No comparable query at all -> no recall, but no crash either.
+    recall, skipped = _recall_at_10(gt_rows, [{"query_id": 9, "top10": []}])
+    assert (recall, skipped) == (None, 2)
+
+
+def test_grid_survives_gt_with_more_queries_than_predictions(tmp_path):
+    """Fewer queries than gt rows: the whole grid still runs."""
+    from scripts.sweep import build_synth_backends, run_grid
+
+    backends = build_synth_backends(n_docs=50, seed=0)
+    queries = [
+        {"query": f"synthetic topic {i} about neural search", "filters": {}}
+        for i in range(3)
+    ]
+    gt_rows = [
+        {"query_id": i, "top10": [f"doc-{j}" for j in range(10)]} for i in range(6)
+    ]
+    out = tmp_path / "out"
+    ledger = tmp_path / "runs.jsonl"
+    rows = run_grid(
+        backends,
+        queries,
+        gt_rows,
+        nprobes=[1, 2],
+        top_coarses=[10],
+        k=5,
+        pair_tokens_list=[64],
+        batch_sizes=[32],
+        out_dir=str(out),
+        ledger_path=str(ledger),
+        budget_ms=5000.0,
+    )
+    assert len(rows) == 2  # every grid point survived
+    for r in rows:
+        assert r["recall_at_10"] is not None
+        assert r["config"]["gt_skipped"] == 3  # gt query_ids 3,4,5 have no pred
+    log = (out / "sweep.log").read_text()
+    assert "skipped" in log
+
+
 def test_reranker_dims_extend_grid(tmp_path):
     """pair-tokens x batch multiply the grid; reranker rebuilt per combo."""
     from scripts.sweep import build_synth_backends, run_grid

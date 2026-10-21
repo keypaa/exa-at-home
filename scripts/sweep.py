@@ -94,10 +94,30 @@ def build_real_backends(
     }
 
 
-def _recall_at_10(gt_rows: list[dict], pred_rows: list[dict]) -> float:
+def _recall_at_10(
+    gt_rows: list[dict], pred_rows: list[dict]
+) -> tuple[float | None, int]:
+    """recall@10 over the gt rows that HAVE a prediction.
+
+    A gt row without a prediction is SKIPPED (and counted), never indexed
+    blind: `pr[g["query_id"]]` used to raise a bare KeyError and abort the
+    sweep, losing every remaining grid point. Mirrors
+    scripts/measure_recall.py, which skips + reports the same way.
+
+    Returns (recall, skipped); recall is None when nothing is comparable.
+    """
     pr = {r["query_id"]: r["top10"] for r in pred_rows}
-    recs = [len(set(g["top10"]) & set(pr[g["query_id"]])) / 10 for g in gt_rows]
-    return sum(recs) / len(recs)
+    recs: list[float] = []
+    skipped = 0
+    for g in gt_rows:
+        top10 = pr.get(g["query_id"])
+        if top10 is None:
+            skipped += 1
+            continue
+        recs.append(len(set(g["top10"]) & set(top10)) / 10)
+    if not recs:
+        return None, skipped
+    return sum(recs) / len(recs), skipped
 
 
 def run_grid(
@@ -181,10 +201,17 @@ def run_grid(
             )
         with open(os.path.join(out_dir, f"pred_{slug}.jsonl"), "w") as f:
             f.writelines(json.dumps(r) + "\n" for r in pred_rows)
-        recall = _recall_at_10(gt_rows, pred_rows) if gt_rows else None
-        row = append_ledger(
-            ledger_path, {"sweep": "knob-grid", **c}, stats, recall=recall
-        )
+        recall, skipped = _recall_at_10(gt_rows, pred_rows) if gt_rows else (None, 0)
+        if skipped:
+            print(
+                f"sweep: warning: {skipped} ground-truth row(s) have no "
+                f"prediction — skipped (recall over the comparable queries)",
+                file=sys.stderr,
+            )
+        cfg = {"sweep": "knob-grid", **c}
+        if gt_rows is not None:
+            cfg["gt_skipped"] = skipped
+        row = append_ledger(ledger_path, cfg, stats, recall=recall)
         p50, viol = pct(stats["total"], 0.5), len(stats["violations"])
         gate = (
             "PASS"
@@ -192,8 +219,9 @@ def run_grid(
             else ("OVER BUDGET" if p50 > budget_ms else "VIOLATIONS")
         )
         rec = f" recall={recall:.4f}" if recall is not None else ""
+        skip_note = f" ({skipped} gt skipped)" if skipped else ""
         log.info(
-            f"{slug}: p50={p50:.2f}ms {gate}{rec} "
+            f"{slug}: p50={p50:.2f}ms {gate}{rec}{skip_note} "
             f"({stats['n']} queries, {viol} violations)"
         )
         rows.append(row)

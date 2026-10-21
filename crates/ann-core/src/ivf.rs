@@ -17,10 +17,10 @@ pub fn route(centroids: &[f32], k: usize, dim: usize, q: &[f32], nprobe: usize) 
         .collect();
     let nprobe = nprobe.min(k);
     if nprobe < scored.len() {
-        scored.select_nth_unstable_by(nprobe, |a, b| b.1.partial_cmp(&a.1).unwrap());
+        scored.select_nth_unstable_by(nprobe, |a, b| crate::cmp_desc(a.1, b.1));
         scored.truncate(nprobe);
     }
-    scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+    scored.sort_by(|a, b| crate::cmp_desc(a.1, b.1));
     scored.into_iter().map(|(c, _)| c).collect()
 }
 
@@ -64,7 +64,7 @@ pub fn search_lists(
             scored.push((row, s));
         }
     }
-    scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+    scored.sort_by(|a, b| crate::cmp_desc(a.1, b.1));
     scored.truncate(top_k);
     scored
 }
@@ -95,6 +95,29 @@ mod tests {
         assert_eq!(route(&centroids, 3, 2, &[1.0, 0.0], 2), vec![1, 0]);
         // nprobe > K clamps instead of panicking.
         assert_eq!(route(&centroids, 3, 2, &[1.0, 0.0], 99), vec![1, 0, 2]);
+    }
+
+    #[test]
+    fn route_survives_nan_scores() {
+        // A NaN centroid poisons the dot product. The ranking sort must be a
+        // total order: it used to panic on `partial_cmp(..).unwrap()`.
+        let centroids = vec![0.0, 1.0, f32::NAN, 0.0, -1.0, 0.0];
+        let got = route(&centroids, 3, 2, &[1.0, 0.0], 2);
+        assert_eq!(got.len(), 2);
+    }
+
+    #[test]
+    fn search_lists_survives_nan_scores() {
+        // Same for the scan: a NaN query makes every score NaN and the
+        // ranking sort must not panic.
+        let codes = packed(&[
+            [1.0, 1.0, -1.0, -1.0],
+            [1.0, -1.0, -1.0, -1.0],
+        ]);
+        let lists = vec![vec![0], vec![1]];
+        let q = vec![f32::NAN; 4];
+        let got = search_lists(&lists, &codes, &[0, 1], &q, 10, None);
+        assert_eq!(got.len(), 2);
     }
 
     #[test]

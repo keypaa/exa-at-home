@@ -12,6 +12,7 @@ from exa_home.index_format import (
     CODES_FILE,
     DIM,
     DOC_IDS_FILE,
+    FILTER_FILES,
     LISTS_FILE,
     MANIFEST,
     SCHEMA,
@@ -20,6 +21,14 @@ from exa_home.index_format import (
     verify_manifest,
     write_manifest,
 )
+
+
+def _write_core_files(index_dir) -> None:
+    """The four files the Rust loader requires unconditionally."""
+    (index_dir / CENTROIDS_FILE).write_bytes(b"\0" * (256 * 4))
+    (index_dir / CODES_FILE).write_bytes(b"\0" * CODE_BYTES)
+    (index_dir / LISTS_FILE).write_bytes(struct.pack("<I", 1) + struct.pack("<I", 0))
+    (index_dir / DOC_IDS_FILE).write_text("[]")
 
 
 def test_schema_constants_match_locked_layout():
@@ -41,6 +50,7 @@ def test_schema_constants_match_locked_layout():
 
 
 def test_manifest_verify_roundtrip(tmp_path):
+    _write_core_files(tmp_path)
     (tmp_path / "a.bin").write_bytes(b"hello")
     write_manifest(str(tmp_path), {"dim": 256, "n_docs": 1, "n_centroids": 1})
     m = verify_manifest(str(tmp_path))
@@ -54,6 +64,7 @@ def test_manifest_verify_roundtrip(tmp_path):
 def test_manifest_verify_rejects_corruption(tmp_path):
     from exa_home.index_format import verify_manifest, write_manifest
 
+    _write_core_files(tmp_path)
     (tmp_path / "a.bin").write_bytes(b"hello")
     write_manifest(str(tmp_path), {"dim": 256})
     (tmp_path / "a.bin").write_bytes(b"evil!")
@@ -65,6 +76,9 @@ def test_manifest_verify_rejects_corruption(tmp_path):
 
 
 def test_manifest_verify_rejects_version_mismatch(tmp_path):
+    from exa_home.index_format import verify_manifest, write_manifest
+
+    _write_core_files(tmp_path)
     (tmp_path / "a.bin").write_bytes(b"hello")
     write_manifest(str(tmp_path), {"dim": 256})
     mpath = tmp_path / MANIFEST
@@ -73,6 +87,71 @@ def test_manifest_verify_rejects_version_mismatch(tmp_path):
     mpath.write_text(json.dumps(m))
     with pytest.raises(ValueError, match="version"):
         verify_manifest(str(tmp_path))
+
+
+def test_verify_manifest_requires_core_files(tmp_path):
+    """The Rust loader refuses an index whose manifest omits a core file;
+    the Python verifier must agree, or the pipeline reuses an index the
+    server cannot load."""
+    _write_core_files(tmp_path)
+    (tmp_path / CODES_FILE).unlink()
+    write_manifest(str(tmp_path), {"dim": 256})
+    with pytest.raises(ValueError, match="codes.bin"):
+        verify_manifest(str(tmp_path))
+
+
+def test_verify_manifest_requires_core_files_when_only_unlisted(tmp_path):
+    """Same check, but the file IS on disk and only the manifest entry is
+    missing (a hand-edited or truncated manifest)."""
+    _write_core_files(tmp_path)
+    write_manifest(str(tmp_path), {"dim": 256})
+    mpath = tmp_path / MANIFEST
+    m = json.loads(mpath.read_text())
+    del m["files"][CODES_FILE]
+    mpath.write_text(json.dumps(m))
+    with pytest.raises(ValueError, match="codes.bin"):
+        verify_manifest(str(tmp_path))
+
+
+def _write_filter_files(index_dir, omit: str = "") -> None:
+    """The six filter/ files the Rust loader pins."""
+    fdir = index_dir / "filter"
+    fdir.mkdir(exist_ok=True)
+    for name in FILTER_FILES:
+        if name == omit:
+            continue
+        (index_dir / name).write_bytes(b"\x00")
+
+
+def test_verify_manifest_requires_filter_files_when_has_filter(tmp_path):
+    _write_core_files(tmp_path)
+    _write_filter_files(tmp_path, omit="filter/terms.json")
+    write_manifest(str(tmp_path), {"dim": 256})
+    m = json.loads((tmp_path / MANIFEST).read_text())
+    assert m["has_filter"] is True
+    with pytest.raises(ValueError, match="filter/terms.json"):
+        verify_manifest(str(tmp_path))
+
+
+def test_manifest_excludes_content_store_but_covers_filter(tmp_path):
+    """The content store is CONTENT, not index state: checksumming every
+    shard made IvfIndex.load O(corpus) (512MB store -> 15.6s load).
+    filter/ stays covered — its bitmaps ARE index state."""
+    _write_core_files(tmp_path)
+    store = tmp_path / "store"
+    store.mkdir()
+    (store / "shard-0.jsonl").write_text('{"id": "a"}\n')
+    (store / "offsets.json").write_text("{}")
+    _write_filter_files(tmp_path)
+    write_manifest(str(tmp_path), {"dim": 256})
+
+    m = json.loads((tmp_path / MANIFEST).read_text())
+    assert not any(k.startswith("store/") for k in m["files"]), m["files"].keys()
+    assert "filter/domains.bin" in m["files"]
+
+    # Content churn in the store must not fail the index verify.
+    (store / "shard-0.jsonl").write_text('{"id": "a"}\n{"id": "b"}\n')
+    verify_manifest(str(tmp_path))
 
 
 def test_index_dir_byte_layout(tmp_path):

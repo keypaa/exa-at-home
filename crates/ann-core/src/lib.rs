@@ -6,6 +6,49 @@ pub mod lut;
 pub mod quant;
 use numpy::{PyReadonlyArray1, PyReadonlyArray2};
 use pyo3::{exceptions::PyValueError, prelude::*, types::PyModule, Bound};
+use std::cmp::Ordering;
+
+/// Descending score comparison (best score first) that is a *total* order.
+///
+/// `f32::partial_cmp` returns `None` when either side is NaN, so the old
+/// `partial_cmp(..).unwrap()` ranking sorts panicked inside Rust and
+/// surfaced to Python as a `pyo3_runtime.PanicException`. NaN now compares
+/// equal to NaN and ranks last (worst) against every real score.
+pub(crate) fn cmp_desc(a: f32, b: f32) -> Ordering {
+    match (a.is_nan(), b.is_nan()) {
+        (true, true) => Ordering::Equal,
+        (true, false) => Ordering::Greater, // a is NaN -> a sorts after b
+        (false, true) => Ordering::Less,
+        (false, false) => b.total_cmp(&a),
+    }
+}
+
+/// Reject a non-finite (NaN/Inf) query vector.
+///
+/// A NaN query poisons every score it takes part in; that is a caller bug,
+/// not a valid search, so it is refused with a clean ValueError instead of
+/// being silently ranked.
+fn check_finite_query(q: &[f32], what: &str) -> Result<(), String> {
+    if let Some(i) = q.iter().position(|v| !v.is_finite()) {
+        return Err(format!(
+            "{what}: query value at index {i} is not finite ({:?}) - \
+             queries must be finite float32 values",
+            q[i]
+        ));
+    }
+    Ok(())
+}
+
+/// Does this filter expression constrain anything at all?
+///
+/// An explicitly empty value list is "no constraint" (the same as not
+/// passing the kwarg), so only a non-empty list or a month span asks for a
+/// filter index.
+fn expr_is_empty(expr: &filter::FilterExpr) -> bool {
+    expr.domains.as_ref().is_none_or(|v| v.is_empty())
+        && expr.month_range.is_none()
+        && expr.terms.as_ref().is_none_or(|v| v.is_empty())
+}
 
 #[pyclass]
 struct AnnIndex {
@@ -28,8 +71,15 @@ impl AnnIndex {
                 ids.len()
             )));
         }
+        // Element-wise copy (not a flat as_slice().unwrap()): tolerates
+        // non-contiguous / Fortran-order matrices instead of panicking.
+        let mut rows = Vec::with_capacity(a.nrows() * a.ncols());
+        for i in 0..a.nrows() {
+            let row = a.row(i);
+            rows.extend(row.iter().copied());
+        }
         Ok(Self {
-            rows: a.as_slice().unwrap().to_vec(),
+            rows,
             n: a.nrows(),
             dim: a.ncols(),
             ids,
@@ -82,7 +132,12 @@ impl AnnIndex {
         // Copy the query out BEFORE releasing the GIL: the array wrapper
         // holds the GIL guard and cannot cross the allow_threads boundary
         // (E0277). 256 floats — the copy is negligible next to the scan.
-        let q: Vec<f32> = q.as_slice().unwrap().to_vec();
+        // Element-wise copy (not as_slice().unwrap()): tolerates
+        // non-contiguous / strided query arrays instead of panicking.
+        let q: Vec<f32> = match q.as_slice() {
+            Ok(s) => s.to_vec(),
+            Err(_) => q.as_array().iter().copied().collect(),
+        };
         if q.len() != self.dim {
             return Err(PyValueError::new_err(format!(
                 "AnnIndex.search: query dim {} != index dim {}",
@@ -90,6 +145,9 @@ impl AnnIndex {
                 self.dim
             )));
         }
+        // A non-finite query is a caller error: refuse it before the scan
+        // (the ranking sort is total now, but NaN scores are meaningless).
+        check_finite_query(&q, "AnnIndex.search").map_err(PyValueError::new_err)?;
         py.allow_threads(|| {
             let q = q.as_slice();
             let mut scored: Vec<(u32, f32)> = (0..self.n as u32)
@@ -98,7 +156,7 @@ impl AnnIndex {
                     (i, quant::dot(row, q))
                 })
                 .collect();
-            scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+            scored.sort_by(|a, b| cmp_desc(a.1, b.1));
             scored.truncate(top_k);
             Ok((
                 scored
@@ -134,6 +192,8 @@ impl AnnIndex {
                 self.dim
             )));
         }
+        // A non-finite query is a caller error: refuse it before the scan.
+        check_finite_query(&q, "AnnIndex.search_binary").map_err(PyValueError::new_err)?;
         py.allow_threads(|| {
             let q = q.as_slice();
             let mut scored: Vec<(u32, f32)> = self
@@ -142,7 +202,7 @@ impl AnnIndex {
                 .enumerate()
                 .map(|(i, c)| (i as u32, quant::binary_dot_packed(c, q)))
                 .collect();
-            scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+            scored.sort_by(|a, b| cmp_desc(a.1, b.1));
             scored.truncate(top_k);
             Ok((
                 scored
@@ -205,6 +265,9 @@ impl IvfIndex {
                 "IvfIndex.search: nprobe must be >= 1",
             ));
         }
+        // A non-finite query is a caller error: refuse it before the scan
+        // (the ranking sort is total now, but NaN scores are meaningless).
+        check_finite_query(&qv, "IvfIndex.search").map_err(PyValueError::new_err)?;
         // Resolve the filter facets to a row-id bitmap BEFORE releasing the
         // GIL (error paths raise instead of serving partial results). Rust
         // resolves filter files internally — bitmaps never cross the FFI.
@@ -222,7 +285,10 @@ impl IvfIndex {
                 rows
             }),
             None => {
-                if expr.domains.is_some() || expr.month_range.is_some() || expr.terms.is_some() {
+                // An explicitly empty filter list is "no constraint" (the
+                // same as not passing the kwarg): only a real filter request
+                // needs index/filter/.
+                if !expr_is_empty(&expr) {
                     return Err(PyValueError::new_err(
                         "IvfIndex.search: filter kwargs need index/filter/ \
                          (build with scripts/build_filter.py)",
@@ -293,4 +359,69 @@ fn ann_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<AnnIndex>()?;
     m.add_class::<IvfIndex>()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cmp_desc_is_total_and_ranks_nan_last() {
+        // Descending score order (best first) that never panics on NaN and
+        // never lets a NaN outrank a real score.
+        assert_eq!(cmp_desc(2.0, 1.0), Ordering::Less);
+        assert_eq!(cmp_desc(1.0, 2.0), Ordering::Greater);
+        assert_eq!(cmp_desc(1.0, 1.0), Ordering::Equal);
+        assert_eq!(cmp_desc(f32::NAN, 1.0), Ordering::Greater);
+        assert_eq!(cmp_desc(1.0, f32::NAN), Ordering::Less);
+        assert_eq!(cmp_desc(f32::NAN, f32::NAN), Ordering::Equal);
+        // Sorting a slice that contains a NaN must not panic.
+        let mut v = [1.0f32, f32::NAN, -1.0, 0.0];
+        v.sort_by(|a, b| cmp_desc(*a, *b));
+        assert_eq!(v[0], 1.0);
+        assert!(v[3].is_nan()); // NaN ranks last (worst)
+    }
+
+    #[test]
+    fn check_finite_query_rejects_nan_and_inf() {
+        assert!(check_finite_query(&[0.0, 1.0], "AnnIndex.search").is_ok());
+        let mut q = [0.0f32; 4];
+        q[2] = f32::NAN;
+        let err = check_finite_query(&q, "AnnIndex.search").unwrap_err();
+        assert!(err.contains("not finite"), "{err}");
+        assert!(err.contains("index 2"), "{err}");
+        q[2] = f32::INFINITY;
+        assert!(check_finite_query(&q, "AnnIndex.search")
+            .unwrap_err()
+            .contains("not finite"));
+        q[2] = f32::NEG_INFINITY;
+        assert!(check_finite_query(&q, "AnnIndex.search")
+            .unwrap_err()
+            .contains("not finite"));
+    }
+
+    #[test]
+    fn empty_filter_lists_mean_no_constraint() {
+        // An explicitly empty value list is "no constraint" (same as not
+        // passing the kwarg): it must not demand index/filter/.
+        assert!(expr_is_empty(&filter::FilterExpr::default()));
+        assert!(expr_is_empty(&filter::FilterExpr {
+            domains: Some(vec![]),
+            terms: Some(vec![]),
+            ..Default::default()
+        }));
+        // A non-empty list, or any month span, is a real filter request.
+        assert!(!expr_is_empty(&filter::FilterExpr {
+            domains: Some(vec!["example.com".into()]),
+            ..Default::default()
+        }));
+        assert!(!expr_is_empty(&filter::FilterExpr {
+            terms: Some(vec!["alpha".into()]),
+            ..Default::default()
+        }));
+        assert!(!expr_is_empty(&filter::FilterExpr {
+            month_range: Some(("2026-01".into(), "2026-02".into())),
+            ..Default::default()
+        }));
+    }
 }

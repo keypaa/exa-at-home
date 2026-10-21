@@ -17,6 +17,9 @@ Consumer contracts (Task 11's MCP server relies on these — keep stable):
   surfacing as a retrieve node error, never silent), then passes the
   translated kwargs straight through to ann.search (terms-AND /
   domains-OR resolved in Rust); this module builds no planner here.
+  date_range is normalised on the way: the Rust filter compares
+  YYYY-MM month buckets lexicographically, so the bounds are sliced to
+  months and turned into a (lo, hi) tuple (JSON lists included).
 - Rerank degraded items lack a "score" key while success items have one;
   the rerank node normalizes (degraded score = coarse ANN score) so
   run_search results have a uniform shape.
@@ -82,8 +85,10 @@ class DAG:
         {"outputs" (completed + inputs so far), "spans" (incl. the failing
         node's span), "error": {node, error, type, span_ms}}. Dependents of
         a failed node never run. A node with timeout_ms set runs in a
-        one-shot worker thread and fails on timeout (same wait-on-exit
-        semantics as Reranker._score_batch's testability path).
+        one-shot worker thread and fails on timeout; the worker is
+        ABANDONED, not joined, so the timeout bounds the wall time
+        (joining it made the timeout a lie: the DAG waited the node's
+        real runtime before reporting the error).
         """
         outputs = dict(inputs)
         spans: dict[str, float] = {}
@@ -95,9 +100,15 @@ class DAG:
                 if node.timeout_ms is None:
                     outputs[name] = node.fn(snap)
                 else:
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+                    try:
                         fut = pool.submit(node.fn, snap)
                         outputs[name] = fut.result(timeout=node.timeout_ms / 1000)
+                    finally:
+                        # wait=False: never join a node that may still be
+                        # running (that join is what blew the timeout
+                        # budget). cancel_futures: drop the queued work.
+                        pool.shutdown(wait=False, cancel_futures=True)
             except Exception as e:  # noqa: BLE001 — failure is data here
                 dt_ms = (time.perf_counter() - t0) * 1000
                 spans[name] = dt_ms
@@ -124,6 +135,58 @@ class DAG:
 SPEC_TO_RUST_FILTERS = {"date_range": "month_range", "keywords": "terms"}
 RUST_FILTER_KEYS = frozenset({"domains", "month_range", "terms", "allow"})
 
+# The Rust filter compares YYYY-MM month buckets lexicographically
+# (`*m >= lo && *m <= hi`), so both bounds must be month buckets.
+_MONTH_LEN = 7  # len("YYYY-MM")
+
+
+def _month_bound(value: object, which: str) -> str:
+    """Normalise one date_range bound to a "YYYY-MM" bucket.
+
+    The spec shape is a full date ("2026-01-01"); the filter index keys
+    are months ("2026-01"). Comparing "2026-01" against "2026-01-01"
+    drops the whole January bucket, so the bound is sliced to the month
+    before it reaches Rust. Anything that is not a YYYY-MM prefix is
+    malformed and raises — a silent partial result set is worse.
+    """
+    if not isinstance(value, str):
+        # ValueError (not TypeError): a malformed filter is a bad
+        # REQUEST, and the spec-§7 contract says filter problems are
+        # reported as ValueError.
+        raise ValueError(  # noqa: TRY004
+            f"date_range {which} bound must be a 'YYYY-MM' string, got {value!r}"
+        )
+    month = value[:_MONTH_LEN]
+    if len(month) != _MONTH_LEN or month[4] != "-" or not month[:4].isdigit():
+        raise ValueError(f"date_range {which} bound {value!r} is not a 'YYYY-MM' date")
+    if not month[5:].isdigit() or not 1 <= int(month[5:]) <= 12:
+        raise ValueError(f"date_range {which} bound {value!r} has no valid month")
+    return month
+
+
+def _month_range(value: object) -> tuple[str, str]:
+    """Normalise a date range to the (lo, hi) "YYYY-MM" tuple Rust wants.
+
+    Over the JSON/MCP transport a range arrives as a LIST (JSON has no
+    tuples) and the Rust binding expects a (String, String) tuple — a
+    list raised a TypeError inside the retrieve node and zeroed the
+    whole search. Both forms are accepted here and normalised.
+    """
+    if isinstance(value, (str, bytes)) or not isinstance(value, (list, tuple)):
+        # ValueError (not TypeError): a malformed filter is a bad
+        # REQUEST, and the spec-§7 contract says filter problems are
+        # reported as ValueError.
+        raise ValueError(  # noqa: TRY004
+            f"date_range must be a [start, end] pair, got {value!r}"
+        )
+    if len(value) != 2:
+        raise ValueError(
+            f"date_range must be a [start, end] pair, got {len(value)} bounds"
+        )
+    lo = _month_bound(value[0], "start")
+    hi = _month_bound(value[1], "end")
+    return lo, hi
+
 
 def translate_filters(filters: dict) -> dict:
     """Map the spec-shaped filter dict to IvfIndex.search kwargs."""
@@ -136,6 +199,8 @@ def translate_filters(filters: dict) -> dict:
                 f"{{domains, date_range, keywords}} (spec shape) or "
                 f"{{domains, month_range, terms, allow}} (Rust shape)"
             )
+        if rust_key == "month_range":
+            v = _month_range(v)
         out[rust_key] = v
     return out
 
@@ -169,11 +234,23 @@ def build_search_dag(embedder, ann, reranker, store, top_coarse=200, nprobe=8):
         parts = x.get("_parts")
         t0 = time.perf_counter()
         cands = []
+        missed = 0
         for c in x["retrieve"]:
             doc = store.get(c["id"])
-            text = doc.get("text", "") if doc else ""
+            if doc is None:
+                # The content store has no text for this id. Keeping it
+                # would occupy a top-k slot with an empty snippet (and
+                # feed the reranker an empty passage) — a response that
+                # LOOKS populated but carries no content. Drop it and
+                # count the drop so it is visible, not silent.
+                missed += 1
+                continue
             cands.append(
-                {"id": c["id"], "text": text, "coarse_score": c["coarse_score"]}
+                {
+                    "id": c["id"],
+                    "text": doc.get("text", ""),
+                    "coarse_score": c["coarse_score"],
+                }
             )
         fetch_ms = (time.perf_counter() - t0) * 1000
         t1 = time.perf_counter()
@@ -182,6 +259,7 @@ def build_search_dag(embedder, ann, reranker, store, top_coarse=200, nprobe=8):
         if parts is not None:
             parts["rerank_fetch_ms"] = fetch_ms
             parts["rerank_model_ms"] = model_ms
+            parts["store_miss_drops"] = missed
         norm = []
         for item in ranked:
             item = dict(item)
@@ -262,6 +340,9 @@ def run_search(dag, query, filters=None, top_k=10, profile=False):
             "rerank_model_ms": parts.get("rerank_model_ms", 0.0),
             "snippet_ms": spans.get("snippet", 0.0),
             "snippet_fetch_ms": parts.get("snippet_fetch_ms", 0.0),
+            # Candidates dropped because the content store had no text for
+            # them — visible instead of silently shortening the results.
+            "store_miss_drops": parts.get("store_miss_drops", 0),
             "total_ms": wall_ms,
         }
     return res

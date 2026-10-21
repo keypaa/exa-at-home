@@ -28,3 +28,8 @@ build-backend = "hatchling.build"
 markers = ["cloud_only: needs GPU/model or >1k docs; never runs in local CI"]
 # Repo root for `exa_home.*`, tests dir for `fixtures.*` (Task 2+ tests use both).
 pythonpath = [".", "tests"]
+
+[tool.ruff]
+# zenno/ holds the historical design spec + plan; their embedded code
+# blocks are records of what was decided then, not code we maintain.
+extend-exclude = ["zenno/"]

@@ -17,6 +17,29 @@ CODES_FILE = "codes.bin"
 LISTS_FILE = "lists.bin"
 DOC_IDS_FILE = "doc_ids.json"
 
+# The Rust loader (crates/ann-core/src/index.rs) reads these four
+# unconditionally, so a manifest that omits one must fail HERE too —
+# otherwise the Python verifier waves through an index the server
+# cannot load ("reusing index/" then a crash on load).
+CORE_FILES = (CENTROIDS_FILE, CODES_FILE, LISTS_FILE, DOC_IDS_FILE)
+
+# filter/ bitmaps ARE index state (crates/ann-core/src/filter.rs pins
+# the same six names) — unlike the content store, they must stay
+# covered by the manifest.
+FILTER_FILES = (
+    "filter/domains.bin",
+    "filter/domains.json",
+    "filter/dates.bin",
+    "filter/dates.json",
+    "filter/terms.bin",
+    "filter/terms.json",
+)
+
+# The content store is CONTENT, not index state: checksumming every
+# shard made IvfIndex.load O(corpus) (512MB store -> 15.6s load,
+# 50MB -> 1.53s). It is excluded from the manifest.
+STORE_DIR = "store"
+
 SCHEMA_VERSION = 1
 DIM = 256
 CODE_BYTES = DIM // 8  # 32: 256 sign bits, Task 5 bit-order contract
@@ -58,11 +81,16 @@ def sha256(path: str) -> str:
 
 
 def _manifest_entries(index_dir: str, prefix: str = "") -> dict:
-    """sha256 of every file under index_dir, keyed by manifest-relative path.
+    """sha256 of every index file under index_dir, keyed by manifest-relative path.
 
     Recurses into subdirectories (filter/ in Task 8) so filter bitmaps are
     covered by the same fail-fast verify path. Keys use forward slashes
     (index/filter/domains.bin), matching the Rust loader's manifest_files().
+
+    The content store (index/store/) is EXCLUDED: it holds the document
+    corpus, not index state, and hashing it made every index load
+    O(corpus size) (512MB store -> 15.6s). The Rust loader reads the
+    store through the Python ContentStore, never through the manifest.
     """
     files = {}
     for name in sorted(os.listdir(index_dir)):
@@ -71,6 +99,8 @@ def _manifest_entries(index_dir: str, prefix: str = "") -> dict:
         full = os.path.join(index_dir, name)
         rel = f"{prefix}{name}"
         if os.path.isdir(full):
+            if not prefix and name == STORE_DIR:
+                continue
             files.update(_manifest_entries(full, prefix=rel + "/"))
         else:
             files[rel] = sha256(full)
@@ -101,7 +131,29 @@ def verify_manifest(index_dir: str) -> dict:
             f"unsupported index version {m.get('version')!r}: "
             f"this code reads version {SCHEMA_VERSION}"
         )
-    for name, want in m["files"].items():
+    files = m.get("files")
+    if not isinstance(files, dict):
+        # ValueError, not TypeError: the Rust loader reports every
+        # manifest problem as a value error, and the two verifiers must
+        # agree on what a broken manifest means.
+        raise ValueError(f"{MANIFEST} has no 'files' object")  # noqa: TRY004
+    # Mirror the Rust loader: the core files are read unconditionally, so
+    # a manifest that omits one must fail HERE (fail-fast) instead of at
+    # load time. The pipeline uses this verifier to decide an existing
+    # index is reusable — a mismatch meant "reusing index/" followed by
+    # a crash on the server.
+    for name in CORE_FILES:
+        if name not in files:
+            raise ValueError(
+                f"{MANIFEST} has no checksum for {name} (required core file)"
+            )
+    if m.get("has_filter"):
+        for name in FILTER_FILES:
+            if name not in files:
+                raise ValueError(
+                    f"{MANIFEST} has no checksum for {name} (required filter file)"
+                )
+    for name, want in files.items():
         got = sha256(os.path.join(index_dir, name))
         if got != want:
             raise ValueError(

@@ -13,6 +13,7 @@ Usage:
         --review eval/review_toy_20261021.json \
         --labels eval/labels_llm_judge_20261021.json
 """
+
 from __future__ import annotations
 
 import argparse
@@ -27,6 +28,11 @@ sys.path.insert(0, ROOT)
 SYSTEMS = (("A", "coarse ANN (no rerank)"), ("B", "reranked (MiniLM-L6)"))
 
 
+def _load_json(path: str):
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
 def score(review: list[dict], labels: dict) -> dict:
     per_query, per_system = [], {k: [] for k, _ in SYSTEMS}
     for s in review:
@@ -38,12 +44,11 @@ def score(review: list[dict], labels: dict) -> dict:
         entries = s["entries"]
         if len(bits) != len(entries):
             raise ValueError(
-                f"query {qid}: {len(bits)} labels vs {len(entries)} entries")
+                f"query {qid}: {len(bits)} labels vs {len(entries)} entries"
+            )
         row = {"qid": s["qid"], "query": s["query"]}
         for key, _name in SYSTEMS:
-            hits = sum(
-                int(bits[n]) for n, e in enumerate(entries) if e["label"] == key
-            )
+            hits = sum(int(bits[n]) for n, e in enumerate(entries) if e["label"] == key)
             per_system[key].append(hits / 10)
             row[key] = hits / 10
         per_query.append(row)
@@ -57,8 +62,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--json", action="store_true", help="emit JSON only")
     a = ap.parse_args(argv)
 
-    review = json.load(open(a.review, encoding="utf-8"))
-    blob = json.load(open(a.labels, encoding="utf-8"))
+    review = _load_json(a.review)
+    blob = _load_json(a.labels)
     labels = blob["labels"] if isinstance(blob, dict) and "labels" in blob else blob
     res = score(review, labels)
 
@@ -70,9 +75,7 @@ def main(argv: list[str] | None = None) -> int:
         },
         "per_query": res["per_query"],
     }
-    d = [
-        r["B"] - r["A"] for r in res["per_query"]
-    ]
+    d = [r["B"] - r["A"] for r in res["per_query"]]
     out["mean_delta_reranked_minus_coarse"] = round(st.mean(d), 4)
     out["queries_where_reranked_better"] = sum(1 for x in d if x > 0)
     out["queries_where_coarse_better"] = sum(1 for x in d if x < 0)
@@ -83,14 +86,18 @@ def main(argv: list[str] | None = None) -> int:
     print(f"{'system':<28}{'precision@10':>14}")
     for key, name in SYSTEMS:
         print(f"{name:<28}{out['precision_at_10'][name]:>14.3f}")
-    print(f"\nmean delta (reranked - coarse): "
-          f"{out['mean_delta_reranked_minus_coarse']:+.3f} "
-          f"({out['queries_where_reranked_better']} better / "
-          f"{out['queries_where_coarse_better']} worse)")
+    print(
+        f"\nmean delta (reranked - coarse): "
+        f"{out['mean_delta_reranked_minus_coarse']:+.3f} "
+        f"({out['queries_where_reranked_better']} better / "
+        f"{out['queries_where_coarse_better']} worse)"
+    )
     print("\nper query:")
     for r in res["per_query"]:
-        print(f"  Q{r['qid']} {r['query'][:46]:<46} "
-              f"coarse={r['A']:.1f} reranked={r['B']:.1f}")
+        print(
+            f"  Q{r['qid']} {r['query'][:46]:<46} "
+            f"coarse={r['A']:.1f} reranked={r['B']:.1f}"
+        )
     return 0
 
 

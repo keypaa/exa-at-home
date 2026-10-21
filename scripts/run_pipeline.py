@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import glob
+import itertools
 import json
 import os
 import sys
@@ -125,24 +126,49 @@ def stage_ingest(
     rx = re.compile(r"robotstxt|crawldiagnostics", re.IGNORECASE)
     seen: set[str] = set()
     kept = 0
+    excluded = 0
+    dup_urls = 0
     with (
         open(tmp, encoding="utf-8") as fin,
         open(docs_path, "w", encoding="utf-8") as fout,
     ):
         for line in fin:
-            if rx.search(line):
-                continue
+            # The exclusion applies to the URL (and an optional `subset`
+            # field) — NEVER to the whole JSON line: the line carries the
+            # page TEXT, so a page whose body merely mentions robots.txt
+            # was silently dropped from the corpus.
             d = json.loads(line)
-            if d["url"] in seen:
+            url = d.get("url", "")
+            subset = d.get("subset", "")
+            if rx.search(url) or (subset and rx.search(subset)):
+                excluded += 1
                 continue
-            seen.add(d["url"])
+            if url in seen:
+                dup_urls += 1
+                continue
+            seen.add(url)
             fout.write(line)
             kept += 1
             if verbose and kept % 100_000 == 0:
                 print(f"[ingest] url-dedup: {kept}", flush=True)
     os.remove(tmp)
-    _log("ingest", t0, f" ({kept} docs -> {docs_path}; {stats})")
-    return {"docs": kept, "stats": stats}
+    _log(
+        "ingest",
+        t0,
+        f" ({kept} docs -> {docs_path}; {stats}; "
+        f"excluded={excluded}; dup_url={dup_urls})",
+    )
+    return {"docs": kept, "stats": stats, "excluded": excluded, "dup_urls": dup_urls}
+
+
+def _count_lines(path: str) -> int:
+    """Number of non-empty lines in a text file (one cheap scan)."""
+    n = 0
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            if line.strip():
+                n += 1
+    return n
 
 
 def stage_embed(
@@ -154,7 +180,17 @@ def stage_embed(
     verbose: bool = False,
     show_progress: bool = False,
 ) -> tuple:
-    """docs.jsonl -> vecs.npy + ids.json (real Embedder; GPU box only)."""
+    """docs.jsonl -> vecs.npy + ids.json (real Embedder; GPU box only).
+
+    The corpus is STREAMED: the docs are read in `batch`-sized chunks and
+    embedded chunk by chunk, so the whole corpus is never held in RAM as
+    Python dicts (at 5M docs that is multiple GB of text — an order of
+    magnitude more than the JSONL itself). The vectors are written through
+    a numpy memmap, so even the n×256 float32 output never has to fit in
+    RAM at once.
+
+    Returns (shape, dtype) — unchanged.
+    """
     import numpy as np
 
     from exa_home.embed import Embedder
@@ -165,31 +201,76 @@ def stage_embed(
         if verbose:
             print(f"[embed] reusing {vecs_path} {v.shape}", flush=True)
         return v.shape, str(v.dtype)
-    with open(docs_path, encoding="utf-8") as f:
-        docs = [json.loads(line) for line in f]
     emb = Embedder()
-    if show_progress:
-        # Per-batch ticks for long bulk runs (silent by default).
-        parts = []
-        for i in range(0, len(docs), batch):
-            parts.append(
-                emb.encode_docs([d["text"][:12000] for d in docs[i : i + batch]])
+    n_docs = _count_lines(docs_path)
+    if n_docs == 0:
+        raise ValueError(f"{docs_path}: no documents to embed")
+    tmp_vecs = vecs_path + ".tmp.npy"
+    tmp_ids = ids_path + ".tmp"
+    mm = None
+    rows = 0
+    ids_written = 0
+    dim = 0
+    dtype = None
+
+    def flush(texts: list[str], ids: list[str]) -> None:
+        """Embed one chunk into the memmap + append its ids."""
+        nonlocal mm, rows, ids_written, dim, dtype
+        vecs = emb.encode_docs(texts)
+        if mm is None:
+            dim = int(vecs.shape[1])
+            dtype = vecs.dtype
+            mm = np.lib.format.open_memmap(
+                tmp_vecs,
+                mode="w+",
+                dtype=dtype,
+                shape=(n_docs, dim),
             )
-            done = min(i + batch, len(docs))
-            print(f"[embed] {done}/{len(docs)} docs", flush=True)
-        vecs = np.vstack(parts)
-    else:
-        vecs = np.vstack(
-            [
-                emb.encode_docs([d["text"][:12000] for d in docs[i : i + batch]])
-                for i in range(0, len(docs), batch)
-            ]
-        )
-    np.save(vecs_path, vecs)
-    with open(ids_path, "w") as f:
-        json.dump([d["id"] for d in docs], f)
-    _log("embed", t0, f" ({vecs.shape} {vecs.dtype})")
-    return vecs.shape, str(vecs.dtype)
+        mm[rows : rows + len(vecs)] = vecs
+        rows += len(vecs)
+        for doc_id in ids:
+            fid.write(("" if ids_written == 0 else ",") + json.dumps(doc_id))
+            ids_written += 1
+
+    try:
+        with (
+            open(docs_path, encoding="utf-8") as fin,
+            open(tmp_ids, "w", encoding="utf-8") as fid,
+        ):
+            fid.write("[")
+            chunk_texts: list[str] = []
+            chunk_ids: list[str] = []
+            for line in fin:
+                line = line.strip()
+                if not line:
+                    continue
+                d = json.loads(line)
+                chunk_texts.append(d["text"][:12000])
+                chunk_ids.append(d["id"])
+                if len(chunk_texts) < batch:
+                    continue
+                flush(chunk_texts, chunk_ids)
+                chunk_texts, chunk_ids = [], []
+                if show_progress:
+                    print(f"[embed] {rows}/{n_docs} docs", flush=True)
+            if chunk_texts:
+                flush(chunk_texts, chunk_ids)
+            fid.write("]")
+        if mm is None:
+            raise ValueError(f"{docs_path}: no documents to embed")
+        if rows != n_docs:
+            raise ValueError(f"{docs_path}: embedded {rows} docs, expected {n_docs}")
+        mm.flush()
+        del mm
+        os.replace(tmp_vecs, vecs_path)
+        os.replace(tmp_ids, ids_path)
+    finally:
+        for tmp in (tmp_vecs, tmp_ids):
+            if os.path.exists(tmp):
+                os.remove(tmp)
+    shape = (n_docs, dim)
+    _log("embed", t0, f" ({shape} {dtype})")
+    return shape, str(dtype)
 
 
 def stage_index(
@@ -203,21 +284,44 @@ def stage_index(
     force: bool = False,
     verbose: bool = False,
 ) -> dict:
-    """vecs + ids + docs -> versioned index/ (centroids, codes, lists, store)."""
+    """vecs + ids + docs -> versioned index/ (centroids, codes, lists, store).
+
+    Reuse is PROVENANCE-GATED: an existing index is reused only when it was
+    built from exactly these inputs (corpus size + vecs/ids hashes — see
+    scripts/build_index.py source_identity). A different corpus, or an index
+    whose provenance is unknown, forces a REBUILD (loudly) — the old code
+    short-circuited on the mere EXISTENCE of <out>/manifest.json, so the
+    toy index was silently reused by the full pipeline and the gate then
+    measured a mismatched index.
+    """
     from exa_home.index_format import verify_manifest
     from scripts.build_index import main as build_main
+    from scripts.build_index import read_source, same_source, source_identity
     from scripts.train_centroids import main as train_main
 
     t0 = time.perf_counter()
     cent_path = os.path.join(os.path.dirname(out.rstrip("/")) or ".", "centroids.npy")
+    # One hash pass over the vectors per call (5 GB at full scale): that is
+    # the price of a reuse decision that can actually detect a mismatch.
+    src = source_identity(vecs_path, ids_path, docs_path)
     if _skip(os.path.join(out, "manifest.json"), force):
-        m = verify_manifest(out)
-        if verbose:
-            print(
-                f"[index] reusing {out} ({m['n_docs']} docs, K={m['n_centroids']})",
-                flush=True,
-            )
-        return m
+        recorded = read_source(out)
+        if same_source(recorded, src):
+            m = verify_manifest(out)
+            if verbose:
+                print(
+                    f"[index] reusing {out} ({m['n_docs']} docs, K={m['n_centroids']})",
+                    flush=True,
+                )
+            return m
+        # Mismatch (or unknown provenance): NEVER reuse silently.
+        print(
+            f"[index] {out} does not match the current corpus "
+            f"(recorded source: {recorded}) — rebuilding instead of reusing "
+            f"a mismatched index",
+            file=sys.stderr,
+            flush=True,
+        )
     train_main(vecs_path, k, sample, cent_path, verbose=verbose)
     build_main(
         vecs_path,
@@ -227,6 +331,7 @@ def stage_index(
         out,
         filter=use_filter,
         verbose=verbose,
+        source=src,
     )
     m = verify_manifest(out)
     _log("index", t0, f" ({m['n_docs']} docs, K={m['n_centroids']} -> {out})")
@@ -258,10 +363,18 @@ def stage_queries(
         if verbose:
             print(f"[queries] reusing {queries_path} + {gt_path}", flush=True)
         return {"reused": True}
+    # Only the first `nq` docs are needed: read them and stop. The old code
+    # materialised the WHOLE corpus as a list of dicts to use docs[:nq].
     with open(docs_path, encoding="utf-8") as f:
-        docs = [json.loads(line) for line in f]
+        docs = [json.loads(line) for line in itertools.islice(f, nq)]
+    if len(docs) < nq:
+        print(
+            f"[queries] warning: corpus has only {len(docs)} docs, {nq} requested",
+            file=sys.stderr,
+            flush=True,
+        )
     with open(queries_path, "w") as f:
-        f.writelines(json.dumps({"query": d["text"][:200]}) + "\n" for d in docs[:nq])
+        f.writelines(json.dumps({"query": d["text"][:200]}) + "\n" for d in docs)
     subprocess.run(
         [
             sys.executable,
@@ -282,6 +395,9 @@ def stage_queries(
 
 
 def cmd_toy(a) -> int:
+    # The toy owns the CANONICAL gate paths (index/ + q.jsonl + gt.jsonl at
+    # the repo root); the full build writes its own corpus-named artifacts
+    # (see cmd_full), so the two never share an index dir.
     stage_fetch("CC-MAIN-2026-34", 4, "wet_urls.txt", force=a.force, verbose=a.verbose)
     stage_download(
         "wet_urls.txt", "data/wet", workers=a.workers, force=a.force, verbose=a.verbose
@@ -320,6 +436,14 @@ def cmd_full(a) -> int:
     tag = f"{a.wet_files}wet"
     urls = f"wet_urls_{tag}.txt"
     wet_dir = f"data/wet_{tag}"
+    # The index + query artifacts are named after the CORPUS: the toy writes
+    # index/ + q.jsonl + gt.jsonl (the canonical gate paths), the full build
+    # writes its own. Sharing one index dir meant the full pipeline silently
+    # reused the 4-doc toy index while stage_queries built q.jsonl/gt.jsonl
+    # from the FULL corpus — the gate then measured a mismatched index.
+    index_dir = f"index_{tag}"
+    q_path = f"q_{tag}.jsonl"
+    gt_path = f"gt_{tag}.jsonl"
     stage_fetch("CC-MAIN-2026-34", a.wet_files, urls, force=a.force, verbose=a.verbose)
     stage_download(urls, wet_dir, workers=a.workers, force=a.force, verbose=a.verbose)
     docs = f"docs_{tag}.jsonl"
@@ -339,16 +463,27 @@ def cmd_full(a) -> int:
         vecs,
         ids,
         docs,
-        "index/",
+        f"{index_dir}/",
         k=a.k,
         use_filter=True,
         force=a.force,
         verbose=a.verbose,
     )
-    stage_queries(docs, vecs, ids, 1000, force=a.force, verbose=a.verbose)
+    stage_queries(
+        docs,
+        vecs,
+        ids,
+        1000,
+        queries_path=q_path,
+        gt_path=gt_path,
+        force=a.force,
+        verbose=a.verbose,
+    )
     print(
         f"full pipeline complete ({a.wet_files} WET, K={a.k}): "
-        "index/ + q.jsonl + gt.jsonl ready"
+        f"{index_dir}/ + {q_path} + {gt_path} ready "
+        f"(gate: scripts/e2e_latency.py --ann ivf --index {index_dir}/ "
+        f"--queries {q_path} ...)"
     )
     return 0
 

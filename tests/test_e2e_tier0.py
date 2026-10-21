@@ -73,6 +73,62 @@ def test_ledger_appends_one_json_row_per_run(tmp_path):
     assert "p50_ms" in row and "p99_ms" in row and "git" in row
 
 
+def test_pct_p50_is_the_50th_smallest_not_the_51st():
+    """p50 of 1..100 is 50 (the 50th smallest), not 51.
+
+    The old helper indexed `int(p * len(xs))` = 50 (0-based) = the 51st
+    smallest value: one rank high, and the same helper decides the budget
+    gate. Nearest-rank definition: 1-based rank ceil(p*n) -> 0-based
+    index ceil(p*n)-1.
+    """
+    import math
+
+    xs = list(range(1, 101))
+    want_rank = math.ceil(0.5 * len(xs))  # 50 -> the 50th smallest
+    assert want_rank == 50
+    assert pct(xs, 0.5) == 50
+    assert pct(xs, 0.5) == sorted(xs)[want_rank - 1]
+    # The old (buggy) answer was one rank high.
+    assert sorted(xs)[int(0.5 * len(xs))] == 51
+
+
+def test_pct_p99_is_nearest_rank():
+    """p99 of 1..100 is the 99th smallest (99), not the max (100)."""
+    import math
+
+    xs = list(range(1, 101))
+    assert pct(xs, 0.99) == sorted(xs)[math.ceil(0.99 * len(xs)) - 1] == 99
+
+
+def test_pct_edge_cases():
+    assert pct([5.0], 0.5) == 5.0
+    assert pct([5.0], 0.99) == 5.0
+    assert pct([1.0, 2.0, 3.0], 0.0) == 1.0
+    assert pct([1.0, 2.0, 3.0], 1.0) == 3.0
+    with pytest.raises(ValueError):
+        pct([], 0.5)
+
+
+def test_budget_gate_uses_the_corrected_p50():
+    """50 fast + 50 slow queries: the p50 is the fast half (10ms).
+
+    With the old off-by-one the gate saw 20ms and failed a 15ms budget.
+    """
+    from scripts.e2e_latency import STAGE_ORDER, report
+
+    totals = [10.0] * 50 + [20.0] * 50
+    stats = {
+        "n": len(totals),
+        "total": totals,
+        "stages": {s: list(totals) for s in STAGE_ORDER},
+        "breakdown": {},
+        "violations": [],
+    }
+    out = report(stats, 15.0)
+    assert "total p50 10.000ms vs 15.0ms -> PASS" in out
+    assert "OVER BUDGET" not in out
+
+
 def test_over_budget_exits_one():
     r = subprocess.run(
         [

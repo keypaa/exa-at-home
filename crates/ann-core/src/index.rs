@@ -150,6 +150,32 @@ pub fn load(dir: &Path) -> Result<Loaded, String> {
         codes.push(c);
     }
 
+    // The manifest's own counts must match what is on disk. The sha256
+    // verify above cannot catch a lying manifest (the manifest is not
+    // covered by its own checksums), so n_docs / n_centroids are checked
+    // against the real row and centroid counts here.
+    if let Some(v) = m.get("n_docs") {
+        let want = v
+            .as_u64()
+            .ok_or_else(|| format!("{MANIFEST} field 'n_docs' is not an integer: {v}"))?;
+        if want != n as u64 {
+            return Err(format!(
+                "{MANIFEST} says n_docs={want} but the index holds {n} docs"
+            ));
+        }
+    }
+    if let Some(v) = m.get("n_centroids") {
+        let want = v.as_u64().ok_or_else(|| {
+            format!("{MANIFEST} field 'n_centroids' is not an integer: {v}")
+        })?;
+        if want != k as u64 {
+            return Err(format!(
+                "{MANIFEST} says n_centroids={want} but {CENTROIDS_FILE} holds \
+                 {k} centroids"
+            ));
+        }
+    }
+
     // lists.bin: u32 K, then per list u32 len + len×u32 row ids.
     let lraw = fs::read(file(LISTS_FILE)).map_err(|e| format!("cannot read {LISTS_FILE}: {e}"))?;
     let mut off = 0usize;
@@ -161,6 +187,10 @@ pub fn load(dir: &Path) -> Result<Loaded, String> {
     }
     let mut lists = Vec::with_capacity(k);
     let mut total: usize = 0;
+    // The posting lists must partition the rows: every row id exactly once.
+    // A row listed twice comes back twice from search() (the serving chain
+    // never dedupes), a row that is never listed is unreachable forever.
+    let mut seen = vec![false; n];
     for c in 0..k {
         let len = read_u32_le(&lraw, &mut off, &format!("len(list {c})"))? as usize;
         let end = off
@@ -175,11 +205,19 @@ pub fn load(dir: &Path) -> Result<Loaded, String> {
             .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
             .collect();
         for &r in &rows {
-            if (r as usize) >= n {
+            let ri = r as usize;
+            if ri >= n {
                 return Err(format!(
                     "{LISTS_FILE} list {c} has out-of-range row id {r} (n={n})"
                 ));
             }
+            if seen[ri] {
+                return Err(format!(
+                    "{LISTS_FILE} lists row id {r} more than once (posting \
+                     lists must partition the {n} rows)"
+                ));
+            }
+            seen[ri] = true;
         }
         off = end;
         total += len;
@@ -191,6 +229,15 @@ pub fn load(dir: &Path) -> Result<Loaded, String> {
             lraw.len() - off
         ));
     }
+    // A row that no list mentions is unreachable: name it, the aggregate
+    // "covers X rows" count below cannot say which one is missing.
+    if let Some(missing) = seen.iter().position(|s| !s) {
+        return Err(format!(
+            "{LISTS_FILE} never lists row id {missing} (posting lists must \
+             partition the {n} rows)"
+        ));
+    }
+    // Defensive: the partition check above already implies total == n.
     if total != n {
         return Err(format!(
             "{LISTS_FILE} covers {total} rows but {CODES_FILE} has n={n}"
@@ -390,6 +437,85 @@ mod tests {
                                    "files": files});
         fs::write(dir.join(MANIFEST), serde_json::to_string(&m).unwrap()).unwrap();
         assert!(load(&dir).unwrap_err().contains("3 ids but"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Rewrite lists.bin with the given posting lists and refresh the
+    /// manifest checksums, so the loader sees a self-consistent index whose
+    /// posting lists are (deliberately) not a partition of the rows.
+    fn rewrite_lists(dir: &Path, lists: &[&[u32]]) {
+        let mut lraw = Vec::new();
+        lraw.extend_from_slice(&(lists.len() as u32).to_le_bytes());
+        for rows in lists {
+            lraw.extend_from_slice(&(rows.len() as u32).to_le_bytes());
+            for r in *rows {
+                lraw.extend_from_slice(&r.to_le_bytes());
+            }
+        }
+        fs::write(dir.join(LISTS_FILE), &lraw).unwrap();
+        refresh_manifest(dir);
+    }
+
+    /// Recompute every core file checksum in the manifest (the manifest is
+    /// never covered by its own checksums).
+    fn refresh_manifest(dir: &Path) {
+        let mraw = fs::read(dir.join(MANIFEST)).unwrap();
+        let mut m: serde_json::Value = serde_json::from_slice(&mraw).unwrap();
+        let mut files = HashMap::new();
+        for name in [CENTROIDS_FILE, CODES_FILE, LISTS_FILE, DOC_IDS_FILE] {
+            files.insert(name.to_string(), sha256_file(&dir.join(name)).unwrap());
+        }
+        m["files"] = serde_json::json!(files);
+        fs::write(
+            dir.join(MANIFEST),
+            serde_json::to_string(&m).unwrap(),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn load_rejects_posting_lists_that_are_not_a_partition() {
+        // d1 listed twice, d2 never listed: the sum of the posting-list
+        // lengths still equals n, so only a real partition check catches it.
+        // Left as-is, search() returns d1 twice and drops d2 forever.
+        let dir = fixture_dir("dup");
+        rewrite_lists(&dir, &[&[0u32, 1, 1], &[3]]);
+        let err = load(&dir).unwrap_err();
+        assert!(err.contains("row id 1"), "{err}");
+        assert!(err.contains("more than once"), "{err}");
+        let _ = fs::remove_dir_all(&dir);
+
+        // Same total, but a row is missing instead of duplicated.
+        let dir = fixture_dir("missing");
+        rewrite_lists(&dir, &[&[0u32, 1], &[3]]);
+        let err = load(&dir).unwrap_err();
+        assert!(err.contains("row id 2"), "{err}");
+        assert!(err.contains("never lists"), "{err}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_rejects_manifest_count_mismatch() {
+        // The manifest's own n_docs must match the real row count.
+        let dir = fixture_dir("ndocs");
+        let mraw = fs::read(dir.join(MANIFEST)).unwrap();
+        let mut m: serde_json::Value = serde_json::from_slice(&mraw).unwrap();
+        m["n_docs"] = serde_json::json!(5_000_000);
+        fs::write(dir.join(MANIFEST), serde_json::to_string(&m).unwrap()).unwrap();
+        let err = load(&dir).unwrap_err();
+        assert!(err.contains("n_docs"), "{err}");
+        assert!(err.contains("5000000"), "{err}");
+        let _ = fs::remove_dir_all(&dir);
+
+        // ... and its n_centroids must match the real centroid count.
+        let dir = fixture_dir("ncentroids");
+        let mraw = fs::read(dir.join(MANIFEST)).unwrap();
+        let mut m: serde_json::Value = serde_json::from_slice(&mraw).unwrap();
+        m["n_centroids"] = serde_json::json!(99);
+        fs::write(dir.join(MANIFEST), serde_json::to_string(&m).unwrap()).unwrap();
+        let err = load(&dir).unwrap_err();
+        assert!(err.contains("n_centroids"), "{err}");
+        assert!(err.contains("99"), "{err}");
         let _ = fs::remove_dir_all(&dir);
     }
 

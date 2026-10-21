@@ -56,7 +56,6 @@ class Reranker:
             self.model.predict([["warmup query", "warmup passage"]])
         except Exception:  # noqa: BLE001, S110 — warmup is best-effort by design
             pass
-        self._pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
 
     def _score_batch(self, query, texts):
         # Truncate each pair to max_pair_tokens so the 6-10ms/200-pair budget holds.
@@ -68,27 +67,33 @@ class Reranker:
             pairs, batch_size=self.batch_size, show_progress_bar=False
         ).tolist()
 
+    def _score(self, query, texts, timeout_ms):
+        """Run _score_batch under a one-shot pool, bounded by timeout_ms.
+
+        The pool is PER CALL and is abandoned (never joined) on timeout.
+        A shared pool was the bug: one hung model call kept the single
+        worker busy, so every later query queued behind it and degraded
+        forever. Joining the abandoned worker had the mirror problem —
+        the "fast" degraded answer still waited for the full model call.
+
+        Returns None when the call timed out or failed.
+        """
+        pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        try:
+            fut = pool.submit(self._score_batch, query, texts)
+            return fut.result(timeout=timeout_ms / 1000)
+        except Exception:  # noqa: BLE001 — any failure degrades, never raises
+            return None
+        finally:
+            # wait=False: do not block on the abandoned worker.
+            # cancel_futures: drop anything still queued behind it.
+            pool.shutdown(wait=False, cancel_futures=True)
+
     def rerank(self, query, candidates):
         if not candidates:
             return [], False
-        pool = getattr(self, "_pool", None)
-        if pool is None:
-            # Testability path: Reranker.__new__ without __init__ (no model
-            # load). Run the injectable _score_batch under a one-shot pool so
-            # the timeout contract still applies.
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as tmp:
-                fut = tmp.submit(
-                    self._score_batch, query, [c["text"] for c in candidates]
-                )
-                try:
-                    scores = fut.result(timeout=self.timeout_ms / 1000)
-                except Exception:  # noqa: BLE001 — any failure degrades, never raises
-                    return list(candidates), True  # degraded: keep coarse ANN order
-        else:
-            fut = pool.submit(self._score_batch, query, [c["text"] for c in candidates])
-            try:
-                scores = fut.result(timeout=self.timeout_ms / 1000)
-            except Exception:  # noqa: BLE001 — any failure degrades, never raises
-                return list(candidates), True  # degraded: keep coarse ANN order
+        scores = self._score(query, [c["text"] for c in candidates], self.timeout_ms)
+        if scores is None:
+            return list(candidates), True  # degraded: keep coarse ANN order
         order = sorted(range(len(candidates)), key=lambda i: scores[i], reverse=True)
         return [{**candidates[i], "score": float(scores[i])} for i in order], False

@@ -17,6 +17,10 @@ class RawDoc:
     text: str
     date: str  # "" for WET v1
     digest: str
+    # Non-empty when the record could NOT be turned into a document
+    # (undecodable payload). The reader yields it instead of dropping it
+    # silently, so write_docs_jsonl can COUNT the loss.
+    error: str = ""
 
 
 @dataclass
@@ -27,19 +31,44 @@ class IngestStats:
 
 
 def read_wet(path: str) -> Iterator[RawDoc]:
+    """Yield RawDoc records from a WET file.
+
+    Payloads that cannot be decoded (or that are empty) are yielded with
+    ``error`` set instead of being dropped: dropping them inside the
+    generator hid the loss from the stats (the reported kept/skipped
+    counts understated it).
+    """
     with open(path, "rb") as f:
         for rec in ArchiveIterator(f):
             if rec.rec_type != "conversion":
                 continue
             url = rec.rec_headers.get_header("WARC-Target-URI")
             payload = rec.content_stream().read()
+            digest = hashlib.sha1(payload).hexdigest()
             try:
                 text = payload.decode("utf-8", errors="strict").strip()
             except UnicodeDecodeError:
-                continue  # counted as skipped downstream only if wired; keep reader pure
-            if not text:
+                yield RawDoc(
+                    id="",
+                    url=url,
+                    title="",
+                    text="",
+                    date="",
+                    digest=digest,
+                    error="undecodable",
+                )
                 continue
-            digest = hashlib.sha1(payload).hexdigest()
+            if not text:
+                yield RawDoc(
+                    id="",
+                    url=url,
+                    title="",
+                    text="",
+                    date="",
+                    digest=digest,
+                    error="empty",
+                )
+                continue
             yield RawDoc(
                 id=f"sha1:{digest}",
                 url=url,
@@ -56,6 +85,12 @@ def write_docs_jsonl(docs: Iterator[RawDoc], out_path: str) -> IngestStats:
     stats, reasons, seen = IngestStats(), Counter(), set()
     with open(out_path, "w", encoding="utf-8") as f:
         for d in docs:
+            if d.error:
+                # The reader could not turn this record into a document:
+                # count it, or the loss never shows up in the stats.
+                stats.skipped += 1
+                reasons[d.error] += 1
+                continue
             if d.digest in seen:
                 stats.skipped += 1
                 reasons["duplicate"] += 1

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 
@@ -30,8 +31,21 @@ BREAKDOWN_KEYS = ("filter_ms", "rerank_fetch_ms", "rerank_model_ms", "snippet_fe
 
 
 def pct(xs, p):
+    """Nearest-rank percentile: the value at 1-based rank ceil(p*n).
+
+    The old helper indexed `int(p * len(xs))`, which for p=0.5 over n=100
+    returned element 50 (0-based) = the 51st smallest value: ONE RANK HIGH.
+    It also made p99 over n=100 the maximum sample. The same helper decides
+    the budget gate (`pct(total, 0.5) > budget_ms`), so the off-by-one
+    decided pass/fail. Nearest-rank (ceil(p*n)-1, clamped) is the standard
+    definition and matches the hand-computed median of an even sample.
+    """
     xs = sorted(xs)
-    return xs[min(len(xs) - 1, int(p * len(xs)))]
+    n = len(xs)
+    if n == 0:
+        raise ValueError("pct: empty sample")
+    idx = math.ceil(p * n) - 1
+    return xs[max(0, min(n - 1, idx))]
 
 
 def load_queries(path: str) -> list[dict]:

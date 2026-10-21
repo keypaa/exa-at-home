@@ -172,6 +172,80 @@ def test_node_timeout_cancels_dependents():
     assert "b" not in out["outputs"]
 
 
+def test_node_timeout_bounds_wall_time():
+    """BUG: the timeout was raised inside `with ThreadPoolExecutor(...)`,
+    so __exit__ -> shutdown(wait=True) JOINED the running node before the
+    error was reported — the timeout only changed the message, not the
+    wall time."""
+    import time
+
+    def slow(_):
+        time.sleep(1.0)
+        return 1
+
+    dag = DAG([Node("a", slow, [], timeout_ms=100)])
+    t0 = time.perf_counter()
+    out = dag.run({})
+    dt_ms = (time.perf_counter() - t0) * 1000
+    assert out["error"]["node"] == "a"
+    assert "Timeout" in out["error"]["type"]
+    assert dt_ms < 500, f"timed-out node blocked the DAG for {dt_ms:.0f}ms"
+
+
+def test_date_range_normalises_to_month_tuple():
+    """The Rust side compares (String, String) month buckets
+    lexicographically, so a JSON list must become a YYYY-MM tuple."""
+    from exa_home.orch import translate_filters
+
+    # JSON transport: a range arrives as a LIST.
+    assert translate_filters({"date_range": ["2026-01-15", "2026-08-20"]}) == {
+        "month_range": ("2026-01", "2026-08")
+    }
+    # The already-valid YYYY-MM tuple form passes through unchanged.
+    assert translate_filters({"date_range": ("2026-01", "2026-08")}) == {
+        "month_range": ("2026-01", "2026-08")
+    }
+    # The Rust-shape key is normalised the same way.
+    assert translate_filters({"month_range": ["2026-01", "2026-08"]}) == {
+        "month_range": ("2026-01", "2026-08")
+    }
+
+
+def test_date_range_rejects_malformed_input():
+    """Malformed ranges must fail loudly, not silently return a partial
+    (or empty) result set."""
+    import pytest
+
+    from exa_home.orch import translate_filters
+
+    for bad in (
+        ["2026-01"],  # not a pair
+        ["2026-01", "2026-08", "2026-09"],  # too long
+        "2026-01",  # not a sequence
+        ["not-a-month", "2026-08"],
+        [None, "2026-08"],
+        ["2026-13", "2026-08"],  # month out of range
+    ):
+        with pytest.raises(ValueError):
+            translate_filters({"date_range": bad})
+
+
+def test_store_miss_candidates_are_dropped_and_counted():
+    """A candidate whose text is missing from the content store must not
+    occupy a top-k slot with an empty snippet."""
+    ann = FakeANN(ids=("d0", "d1", "ghost"))
+    dag = build_search_dag(
+        FakeEmbedder(),
+        ann,
+        FakeReranker(),
+        FakeStore(_docs()),  # "ghost" missing
+    )
+    res = run_search(dag, "q", {}, top_k=5, profile=True)
+    assert [r["id"] for r in res["results"]] == ["d0", "d1"]
+    assert all(r["snippet"] for r in res["results"])
+    assert res["profile"]["store_miss_drops"] == 1
+
+
 def test_run_search_reports_node_error_without_raising():
     def bad(_):
         raise RuntimeError("ann down")

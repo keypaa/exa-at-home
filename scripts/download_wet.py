@@ -29,30 +29,61 @@ def _remote_size(url: str) -> int | None:
         return None
 
 
+def _truncate(path: str, size: int) -> None:
+    """Cut `path` to exactly `size` bytes (no-op when it is missing)."""
+    if not os.path.exists(path):
+        if size:
+            raise OSError(f"{path}: cannot truncate a missing file")
+        return
+    with open(path, "r+b") as f:
+        f.truncate(size)
+
+
 def fetch_one(url: str, out_dir: str) -> tuple[str, int]:
-    """Download one URL with resume + retries. Returns (path, bytes_on_disk)."""
+    """Download one URL with resume + retries. Returns (path, bytes_on_disk).
+
+    Resume is OFFSET-SAFE: the on-disk size is re-read at the TOP of every
+    attempt, because a failed attempt leaves its partial bytes on disk. The
+    old code captured the size ONCE before the retry loop, so the next
+    attempt sent a stale `Range` and appended behind the partial prefix —
+    duplicating it (corrupt gzip stream) — and the next run then saw
+    `have >= total` and skipped the corrupt file as "already complete".
+
+    A resumed file therefore ends up byte-identical to a fresh download.
+    """
     name = url.rsplit("/", 1)[-1]
     path = os.path.join(out_dir, name)
-    have = os.path.getsize(path) if os.path.exists(path) else 0
     total = _remote_size(url)
-    if total is not None and have >= total > 0:
-        return path, have  # already complete: skip
+    if total is not None and total > 0:
+        have = os.path.getsize(path) if os.path.exists(path) else 0
+        if have > total:
+            # Local file is LONGER than the remote object: it is corrupt
+            # (e.g. a duplicated partial prefix left by an earlier crash).
+            # Restart from scratch instead of "already complete: skip".
+            _truncate(path, 0)
+        elif have >= total:
+            return path, have  # already complete: skip
     last: Exception | None = None
     for attempt in range(RETRIES):
         try:
+            # Re-read the size EVERY attempt: a failed attempt may have
+            # left a partial prefix behind, and the Range header + the
+            # append offset must both match what is really on disk.
+            have = os.path.getsize(path) if os.path.exists(path) else 0
             req = urllib.request.Request(url)
             if have:
                 req.add_header("Range", f"bytes={have}-")
             with urllib.request.urlopen(req, timeout=120) as r:
                 if r.status == 206:
                     mode = "ab"  # resume accepted
-                elif r.status == 200 and have:
-                    mode = "wb"  # server ignored Range: restart
-                    have = 0
                 elif r.status == 200:
-                    mode = "wb"
+                    mode = "wb"  # server ignored Range: restart from scratch
                 else:
                     raise OSError(f"unexpected HTTP {r.status} for {url}")
+                if mode == "ab":
+                    # Drop anything past the resume offset so the append can
+                    # never duplicate a partial prefix.
+                    _truncate(path, have)
                 with open(path, mode) as f:
                     while True:
                         chunk = r.read(1 << 20)

@@ -36,6 +36,71 @@ sys.path.insert(0, ROOT)
 
 CHUNK = 50_000
 
+# Provenance sidecar: WHICH corpus an index was built from. It is NOT part
+# of the locked index layout (manifest.json keys, centroids.f32, codes.bin,
+# lists.bin, doc_ids.json stay exactly as specified) and it is written AFTER
+# the manifest, so the manifest's file set never changes. The pipeline uses
+# it to decide whether an existing index may be reused at all.
+SOURCE_FILE = "source.json"
+
+
+def _file_size(path: str) -> int:
+    try:
+        return os.path.getsize(path)
+    except OSError:
+        return -1
+
+
+def source_identity(vecs_path: str, ids_path: str, docs_path: str) -> dict:
+    """Identity of the corpus an index is built from.
+
+    The paths alone are NOT an identity: the same file name can hold a
+    different corpus after a re-ingest (the toy/full pipelines share the
+    working directory). So the corpus size plus the size + content hash of
+    the vectors and the ids go in as well.
+    """
+    from exa_home.index_format import sha256
+
+    return {
+        "docs": docs_path,
+        "docs_size": _file_size(docs_path),
+        "vecs": vecs_path,
+        "vecs_size": _file_size(vecs_path),
+        "vecs_sha256": sha256(vecs_path),
+        "ids": ids_path,
+        "ids_size": _file_size(ids_path),
+        "ids_sha256": sha256(ids_path),
+    }
+
+
+def same_source(recorded: dict | None, current: dict) -> bool:
+    """True when `recorded` describes exactly the corpus `current` does.
+
+    The paths are deliberately NOT compared (the same corpus may be reached
+    through a relative or an absolute path); the sizes + hashes are.
+    """
+    if not recorded:
+        return False
+    return all(
+        recorded.get(key) == current.get(key)
+        for key in ("docs_size", "vecs_size", "vecs_sha256", "ids_size", "ids_sha256")
+    )
+
+
+def read_source(index_dir: str) -> dict | None:
+    """The recorded provenance of an index dir (None when unknown)."""
+    try:
+        with open(os.path.join(index_dir, SOURCE_FILE)) as f:
+            rec = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return rec if isinstance(rec, dict) else None
+
+
+def write_source(index_dir: str, source: dict) -> None:
+    with open(os.path.join(index_dir, SOURCE_FILE), "w") as f:
+        json.dump(source, f, indent=2, sort_keys=True)
+
 
 def assign(vecs, centroids, verbose: bool = False):
     import numpy as np
@@ -51,6 +116,37 @@ def assign(vecs, centroids, verbose: bool = False):
     return out
 
 
+class _DocSource:
+    """Lazy view over a docs.jsonl file: len() + iteration, no full list.
+
+    scripts/build_filter.build() needs `len(docs)` (the n_docs count) and
+    `enumerate(docs)` (the row ids) — both work with a lazy sequence, so
+    the corpus is streamed into the filter builder instead of being
+    materialised as a list of dicts (multiple GB at 5M docs).
+    """
+
+    def __init__(self, path: str):
+        self.path = path
+        self._n = -1
+
+    def __len__(self) -> int:
+        if self._n < 0:
+            n = 0
+            with open(self.path, encoding="utf-8") as f:
+                for line in f:
+                    if line.strip():
+                        n += 1
+            self._n = n
+        return self._n
+
+    def __iter__(self):
+        with open(self.path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    yield json.loads(line)
+
+
 def main(
     vecs_path: str,
     ids_path: str,
@@ -63,6 +159,7 @@ def main(
     max_terms: int = 50_000,
     crawl: str = "CC-MAIN-2026-34",
     verbose: bool = False,
+    source: dict | None = None,
 ) -> dict:
     import numpy as np
 
@@ -132,16 +229,25 @@ def main(
     if filter:
         from scripts.build_filter import build as build_filter
 
-        docs = []
-        with open(docs_path, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    docs.append(json.loads(line))
-        build_filter(docs, os.path.join(out, "filter"), max_terms)
+        # Streamed: the docs are handed over one at a time (the old code
+        # built the whole list first — GBs of text as Python dicts at 5M
+        # docs). The filter layout is unchanged.
+        build_filter(_DocSource(docs_path), os.path.join(out, "filter"), max_terms)
 
     # Manifest LAST so filter/ + store shards are covered by verify.
+    # The provenance sidecar is written after it (and any stale copy is
+    # removed before it) so the manifest's file set — and with it the
+    # locked on-disk index layout — never changes.
+    src = (
+        source
+        if source is not None
+        else source_identity(vecs_path, ids_path, docs_path)
+    )
+    stale_source = os.path.join(out, SOURCE_FILE)
+    if os.path.exists(stale_source):
+        os.remove(stale_source)
     write_manifest(out, {"dim": DIM, "n_docs": n, "n_centroids": k, "crawl": crawl})
+    write_source(out, src)
     print(f"index {n} docs, K={k} -> {out} (stored {n_stored}, filter={filter})")
     return {"n_docs": n, "n_centroids": k, "n_stored": n_stored}
 
