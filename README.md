@@ -12,13 +12,14 @@ rerank only.
 the 100ms budget — PASS.** Ledger-backed (`runs.jsonl`, 2026-10-21, np8 /
 tc50 / pt64 / b32): **p50 43.67ms, recall@10 = 0.2885.**
 
-The same index served *without* the cross-encoder is faster still
-(~14ms) and scores **0.4015** exact-id recall — i.e. the reranker is not
-yet justified by any measurement we have; see
-[`EXPERIMENTS.md`](EXPERIMENTS.md) M5/M5f and
-[`LEARNINGS.md`](LEARNINGS.md) §4. Details and judgment in
-[`EXPERIMENTS.md`](EXPERIMENTS.md) / [`LEARNINGS.md`](LEARNINGS.md);
-the plan lives in [`WORKPLAN.md`](WORKPLAN.md).
+**On question-like queries** (50 natural questions, known target pages):
+target recall@10 **0.740** either way, target MRR@10 **0.641 → 0.712** with
+the cross-encoder, no degradations — so the reranker **stays** (the
+pre-registered rule fired; the effect is favourable but not significant at
+n=50). The earlier "the reranker hurts" reading came from measuring it with
+document prefixes instead of questions — see [`EXPERIMENTS.md`](EXPERIMENTS.md)
+M5/M5f/M5h and [`LEARNINGS.md`](LEARNINGS.md) §4, §13–14. The plan lives in
+[`WORKPLAN.md`](WORKPLAN.md).
 
 ## How it works
 
