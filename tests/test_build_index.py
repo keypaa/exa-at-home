@@ -196,13 +196,16 @@ def test_select_slice_max_parts_strided_sample():
     """--max-parts samples the part files with a stride (unbiased) instead
     of truncating: scanning half the corpus costs half the HTTP time."""
     from scripts.select_slice import sample_parts
+
     parts = [f"part-{i:05d}-x.parquet" for i in range(300)]
     assert len(sample_parts(parts, None)) == 300
     half = sample_parts(parts, 150)
     assert len(half) == 150
     # stride, not prefix: evenly spaced, first element included
     assert half[0] == parts[0]
-    gaps = {parts.index(half[i + 1]) - parts.index(half[i]) for i in range(len(half) - 1)}
+    gaps = {
+        parts.index(half[i + 1]) - parts.index(half[i]) for i in range(len(half) - 1)
+    }
     assert gaps == {2}
     assert sample_parts(parts, 10) == parts[::30]
     assert sample_parts(parts, 300) == parts
