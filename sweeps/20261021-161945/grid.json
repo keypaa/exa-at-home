@@ -1,0 +1,25 @@
+{
+  "combos": [
+    {
+      "nprobe": 8,
+      "top_coarse": 50,
+      "max_pair_tokens": 64,
+      "batch_size": 16
+    },
+    {
+      "nprobe": 8,
+      "top_coarse": 50,
+      "max_pair_tokens": 64,
+      "batch_size": 32
+    },
+    {
+      "nprobe": 8,
+      "top_coarse": 50,
+      "max_pair_tokens": 64,
+      "batch_size": 64
+    }
+  ],
+  "k": 10,
+  "budget_ms": 100.0,
+  "n_queries": 200
+}

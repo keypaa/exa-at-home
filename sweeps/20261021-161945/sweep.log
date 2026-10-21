@@ -1,0 +1,4 @@
+16:20:37 np8_tc50_pt64_b16: p50=57.03ms PASS recall=0.2885 (200 queries, 0 violations)
+16:20:54 np8_tc50_pt64_b32: p50=42.34ms PASS recall=0.2885 (200 queries, 0 violations)
+16:21:11 np8_tc50_pt64_b64: p50=42.94ms PASS recall=0.2885 (200 queries, 0 violations)
+16:21:11 sweep done in 85.7s -> sweeps/20261021-161945
