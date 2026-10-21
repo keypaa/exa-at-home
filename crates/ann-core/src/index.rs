@@ -186,9 +186,9 @@ pub fn load(dir: &Path) -> Result<Loaded, String> {
         }
     }
     if let Some(v) = m.get("n_centroids") {
-        let want = v.as_u64().ok_or_else(|| {
-            format!("{MANIFEST} field 'n_centroids' is not an integer: {v}")
-        })?;
+        let want = v
+            .as_u64()
+            .ok_or_else(|| format!("{MANIFEST} field 'n_centroids' is not an integer: {v}"))?;
         if want != k as u64 {
             return Err(format!(
                 "{MANIFEST} says n_centroids={want} but {CENTROIDS_FILE} holds \
@@ -421,7 +421,9 @@ mod tests {
                 Ok(n)
             }
         }
-        let data: Vec<u8> = (0..(HASH_CHUNK * 3 + 12345)).map(|i| (i % 251) as u8).collect();
+        let data: Vec<u8> = (0..(HASH_CHUNK * 3 + 12345))
+            .map(|i| (i % 251) as u8)
+            .collect();
         let mut counter = Counting {
             data: data.clone(),
             pos: 0,
@@ -453,10 +455,7 @@ mod tests {
         let empty = dir.join("empty.bin");
         fs::write(&empty, b"").unwrap();
         let h = Sha256::new();
-        assert_eq!(
-            sha256_file(&empty).unwrap(),
-            format!("{:x}", h.finalize())
-        );
+        assert_eq!(sha256_file(&empty).unwrap(), format!("{:x}", h.finalize()));
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -548,11 +547,7 @@ mod tests {
             files.insert(name.to_string(), sha256_file(&dir.join(name)).unwrap());
         }
         m["files"] = serde_json::json!(files);
-        fs::write(
-            dir.join(MANIFEST),
-            serde_json::to_string(&m).unwrap(),
-        )
-        .unwrap();
+        fs::write(dir.join(MANIFEST), serde_json::to_string(&m).unwrap()).unwrap();
     }
 
     #[test]

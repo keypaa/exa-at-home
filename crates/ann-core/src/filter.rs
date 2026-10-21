@@ -565,11 +565,11 @@ mod tests {
         let dir = fixture_dir("domains");
         let f = load(&dir).unwrap();
         for q in [
-            "example.com",       // already normalized
-            "EXAMPLE.COM",       // upper case
-            "Example.Com",       // mixed case
-            "www.example.com",   // leading www.
-            "WWW.Example.COM",   // both
+            "example.com",     // already normalized
+            "EXAMPLE.COM",     // upper case
+            "Example.Com",     // mixed case
+            "www.example.com", // leading www.
+            "WWW.Example.COM", // both
         ] {
             let e = FilterExpr {
                 domains: Some(vec![q.into()]),
@@ -602,7 +602,7 @@ mod tests {
             vec![1, 70_000],
             vec![1, 70_000, 140_000],
             vec![0, 1, 2, 65_535, 65_536, 131_072],
-            (0..5_000u32).collect(),  // dense: bitmap container
+            (0..5_000u32).collect(), // dense: bitmap container
             (0..100u32).collect(),   // dense: run container (see below)
             vec![u32::MAX],
         ];
@@ -661,10 +661,9 @@ mod tests {
         // BitMap of four 10-row runs); the crate's reader accepts them, so
         // the fast path must too.
         let one_run: Vec<u8> = (0..15)
-            .map(|i| u8::from_str_radix(
-                &"3b3000000100006300010000006300"[i * 2..i * 2 + 2],
-                16,
-            ).unwrap())
+            .map(|i| {
+                u8::from_str_radix(&"3b3000000100006300010000006300"[i * 2..i * 2 + 2], 16).unwrap()
+            })
             .collect();
         assert_eq!(serialized_max_row(&one_run), Some(99));
         let four_runs: Vec<u8> = (0..61)
@@ -697,9 +696,23 @@ mod tests {
         let dir = fixture_dir("fastpath");
         let f = load(&dir).unwrap();
         assert!(f.check_row_space(3).is_ok());
-        assert_eq!(f.domains.fallbacks.load(std::sync::atomic::Ordering::Relaxed), 0, "domains facet fell back");
-        assert_eq!(f.dates.fallbacks.load(std::sync::atomic::Ordering::Relaxed), 0, "dates facet fell back");
-        assert_eq!(f.terms.fallbacks.load(std::sync::atomic::Ordering::Relaxed), 0, "terms facet fell back");
+        assert_eq!(
+            f.domains
+                .fallbacks
+                .load(std::sync::atomic::Ordering::Relaxed),
+            0,
+            "domains facet fell back"
+        );
+        assert_eq!(
+            f.dates.fallbacks.load(std::sync::atomic::Ordering::Relaxed),
+            0,
+            "dates facet fell back"
+        );
+        assert_eq!(
+            f.terms.fallbacks.load(std::sync::atomic::Ordering::Relaxed),
+            0,
+            "terms facet fell back"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -730,10 +743,14 @@ mod tests {
         assert!(err.contains("corrupt"), "{err}");
         assert!(err.contains("example.com"), "{err}");
         // The corrupt bitmap went through the fallback, not the fast path.
-        assert_eq!(f.domains.fallbacks.load(std::sync::atomic::Ordering::Relaxed), 1);
+        assert_eq!(
+            f.domains
+                .fallbacks
+                .load(std::sync::atomic::Ordering::Relaxed),
+            1
+        );
         let _ = fs::remove_dir_all(&dir);
     }
-
 
     #[test]
     fn check_row_space_rejects_stale_row_ids() {

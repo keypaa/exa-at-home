@@ -77,9 +77,9 @@ fn resolve_n_coarse(n_coarse: Option<usize>, top_k: Option<usize>) -> Result<usi
              n_coarse=<value> instead"
                 .into(),
         ),
-        (Some(_), Some(_)) => Err(
-            "IvfIndex.search: pass either n_coarse or its old name top_k, not both".into(),
-        ),
+        (Some(_), Some(_)) => {
+            Err("IvfIndex.search: pass either n_coarse or its old name top_k, not both".into())
+        }
     }
 }
 

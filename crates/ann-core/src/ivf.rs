@@ -114,10 +114,7 @@ mod tests {
     fn search_lists_survives_nan_scores() {
         // Same for the scan: a NaN query makes every score NaN and the
         // ranking sort must not panic.
-        let codes = packed(&[
-            [1.0, 1.0, -1.0, -1.0],
-            [1.0, -1.0, -1.0, -1.0],
-        ]);
+        let codes = packed(&[[1.0, 1.0, -1.0, -1.0], [1.0, -1.0, -1.0, -1.0]]);
         let lists = vec![vec![0], vec![1]];
         let q = vec![f32::NAN; 4];
         let got = search_lists(&lists, &codes, &[0, 1], &q, 10, None);
