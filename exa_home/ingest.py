@@ -5,6 +5,7 @@ import hashlib
 import json
 from collections.abc import Iterator
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
 from warcio.archiveiterator import ArchiveIterator
 
@@ -28,6 +29,29 @@ class IngestStats:
     kept: int = 0
     skipped: int = 0
     reasons: dict | None = None
+
+
+def _title_from_url(url: str) -> str:
+    """Derive a usable heading from a URL slug (WET has no <title>).
+
+    Slugs like ``/how-to-build-an-ann.html`` become ``How To Build An Ann``.
+    Returns "" for URLs without a last path segment (the caller falls
+    back to the first short line of the body if needed).
+    """
+    if not url:
+        return ""
+    try:
+        tail = urlsplit(url).path.rsplit("/", 1)[-1]
+    except ValueError:
+        return ""
+    if not tail:
+        return ""
+    base = tail.rsplit(".", 1)[0]
+    parts = [p for p in base.replace("_", " ").replace("-", " ").split() if p]
+    if not parts or parts == [base] and len(base) > 60:
+        return ""
+    return " ".join(part[:1].upper() + part[1:] for part in parts)
+
 
 
 def read_wet(path: str) -> Iterator[RawDoc]:
@@ -72,7 +96,7 @@ def read_wet(path: str) -> Iterator[RawDoc]:
             yield RawDoc(
                 id=f"sha1:{digest}",
                 url=url,
-                title="",
+                title=_title_from_url(url),
                 text=text,
                 date="",
                 digest=digest,
