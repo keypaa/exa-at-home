@@ -20,6 +20,7 @@ jobs:
         working-directory: crates/ann-core
       - run: .venv/bin/ruff check exa_home/ scripts/ tests/ notebooks/
       - run: .venv/bin/ruff format --check exa_home/ scripts/ tests/ notebooks/
+      - run: .venv/bin/python scripts/gate.py --synth --n-docs 200 --json
       - run: .venv/bin/python -m pytest tests/ -m "not cloud_only" -q
       - run: cargo test -p ann-core
       - run: cargo fmt --check -p ann-core
