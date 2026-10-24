@@ -160,7 +160,7 @@ def gate_real(index_dir, queries, gt, pred, pred16, e3_result_path, budget_ms,
     q_list = [json.loads(line)["query"] for line in Path(queries).read_text().splitlines() if line.strip()]
     dag = build_search_dag(emb, ann, rr, store, top_coarse=50, nprobe=8)
     totals = []
-    for q in q_list[: min(50, len(q_list))]:
+    for q in q_list[: min(200, len(q_list))]:
         r = run_search(dag, q, {}, 10, profile=True)
         totals.append(r["profile"]["total_ms"])
     p50 = _pct(totals, 0.5)
