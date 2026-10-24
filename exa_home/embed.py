@@ -57,7 +57,10 @@ class Embedder:
         # proved unloadable (hard xformers assert in its custom modeling
         # file). truncate_dim=256 uses the model's MRL support; 256-dim
         # quality is MEASURED by our recall harness, not vendor-claimed.
-        self.model = SentenceTransformer(model, truncate_dim=dim, device=device)
+        self.device = device or ("cuda" if self._is_cuda() else "cpu")
+        self.model = SentenceTransformer(
+            model, truncate_dim=dim, device=self.device
+        )
         # The model's own max_seq_length (512) is what actually gets
         # embedded — a `text[:12000]` slice upstream is a no-op beyond
         # ~2000 characters. Set it explicitly so the number is visible
@@ -65,9 +68,14 @@ class Embedder:
         if max_seq_length is not None:
             self.model.max_seq_length = max_seq_length
         self.max_seq_length = int(self.model.max_seq_length)
-        # sentence-transformers defaults to batch_size=32 and float32: on a
-        # 96GB GPU that used ~3GB and 442 docs/s. Half precision on CUDA
-        # is the single biggest lever (tensor cores).
+        # Half precision on CUDA: the single biggest lever (tensor cores).
+        # sentence-transformers 6.0.1 does NOT accept precision='float16'
+        # (its encode() allows only float32/int8/uint8/binary/ubinary), so
+        # fp16 must be achieved by casting the weights — the forward pass
+        # then runs in half without autocast, and _encode() casts back to
+        # float32 for storage.
+        if self._is_cuda():
+            self.model.half()
         self.precision = "float16" if self._is_cuda() else "float32"
         self.batch_size = batch_size or EMBED_BATCH
 
@@ -86,15 +94,13 @@ class Embedder:
         )
         return np.asarray(enc["length"], dtype=np.int64)
 
-    def _encode(self, texts: list[str], batch_size: int, **kwargs) -> np.ndarray:
+    def _encode(self, texts: list[str], batch_size: int) -> np.ndarray:
         v = self.model.encode(
             texts,
             batch_size=batch_size,
             normalize_embeddings=True,
             show_progress_bar=False,
             convert_to_numpy=True,
-            precision=self.precision,
-            **kwargs,
         )
         return v[:, : self.dim].astype(np.float32) / (
             np.linalg.norm(v[:, : self.dim], axis=1, keepdims=True) + 1e-12
