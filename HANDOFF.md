@@ -413,13 +413,15 @@ re-run the gate live.
 
 ## 16. Immediate next step
 
-**Item 1: embed throughput diagnostic.** The embedder is CPU-bound (442 docs/s,
-96GB GPU at 1.1GB). Design a before/after measurement for pre-tokenizing
-offline: tokenize all docs once, save ids, then the GPU does pure forward
-passes. Measure docs/s before and after. Record as M9 in EXPERIMENTS.
+**Item 3: the four gates as one command.** After M9 (+41.6%) and item 2
+(resumable embed, verified on the box at 81380 rows), the embed bottleneck
+and crash-safety are settled. The remaining measurement blocker is that G1–G4
+are defined in prose only, with no threshold and no command. Design
+`scripts/gate.py` (thresholds + drop budgets), land Tier-0 versions, then
+wire it into CI and into the 1M session plan (item 4).
 
-Then item 2 (resumable chunked embed), then item 4 (1M session plan), then
-item 5 (the 1M build itself).
+The pre-tokenize diagnostic (item 1b) closed with a pass; the
+max-seq-length sweep is a follow-up M10 row, **not** a blocker ahead of 1M.
 
 The E3 protocol (for the reranker decision, already decided) lives in
 `eval/E3_PROTOCOL.md`. The next experiment that needs the box is the

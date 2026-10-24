@@ -17,8 +17,8 @@ The map of the whole project: [`ROADMAP.md`](ROADMAP.md).
 | # | Item | State | Done when |
 |---|------|-------|-----------|
 | 1 | **Embed throughput**: fp16 + real GPU batch + length bucketing + explicit `max_seq_length` | **done (M8)** | measured 442 → 457 docs/s (+3.4%); **the embedder is CPU-bound, not GPU-bound** (fp16 + 32→1024 batches barely move it). The real lever is pre-tokenizing offline; see item 1b. |
-| 1b | **Embed diagnostic + pre-tokenize**: profile one batch (torch.profiler) to settle CPU-tokenize vs transfer, then tokenize once offline and save token ids → pure-GPU forward passes | to do | docs/s measured; the 1M embed drops from ~37 min to a few minutes |
-| 2 | **Resumable chunked embed** (per-chunk part files, resume from the last complete chunk) | to do | an interrupted 1M embed resumes instead of restarting |
+| 1b | **Embed diagnostic + pre-tokenize (M9)** | **done** | measured CPU-tokenize = 50.4% of the wall; manual single-pass forward landed +41.6% (636 → 901 docs/s, `exa_home/embed.py`, commit `a67f7d8`). Max-seq-length sweep deferred (a separate M10 row). |
+| 2 | **Resumable chunked embed** (per-chunk state + resume) | **done** | `scripts/embed_resumable.py` + `stage_embed` wrapper (`afe4012`+). Verified on the box: SIGKILL at 57344 rows → cold resume completes (81380 rows), idempotent re-run identical hash (see HANDOFF tail). |
 | 3 | **The four gates** (below) — thresholds + one command | to do | `scripts/gate.py` exits non-zero on a regression; drop budgets pre-registered |
 | 4 | **1M session plan** (written, like E3's) | to do | one paste, pre-registered acceptance criteria, no improvisation |
 | 5 | **1M build** (unranked first-130 WET — the same selection rule as the toy) | to do | index/ built, gate run, 81k-vs-1M comparison reported. **Ingest is now the long pole** (2473 docs/s = 6.7 min @1M) — parallelize before 5M |
