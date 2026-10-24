@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import threading
 from collections import OrderedDict
 
 OFFSETS_FILENAME = "offsets.json"
@@ -16,6 +17,7 @@ class ContentStore:
         self.root = root
         os.makedirs(root, exist_ok=True)
         self._lru: OrderedDict[str, dict] = OrderedDict()
+        self._lock = threading.RLock()
         self._lru_size = lru_size
         self.stats = {"hits": 0, "misses": 0}
         # id -> (shard_path, byte_offset, record_length) index. Built
@@ -45,19 +47,13 @@ class ContentStore:
         )
 
     def begin_bulk(self) -> None:
-        """Enable offset tracking for a bulk load (build_index path).
-
-        Sets an empty index so each put() records its byte offset.
-        Call save_index() after the loop — no rescan needed.
-        """
-        if self._index is None:
-            self._index = {}
-            # Baseline the shard sizes as they are NOW: the bulk load
-            # appends to whatever is already on disk, and a later growth
-            # must still be detectable.
-            self._shard_sizes = {
-                path: os.path.getsize(path) for path in self._shard_paths()
-            }
+        """Enable offset tracking for a bulk load (build_index path)."""
+        with self._lock:
+            if self._index is None:
+                self._index = {}
+                self._shard_sizes = {
+                    path: os.path.getsize(path) for path in self._shard_paths()
+                }
 
     def _shard_paths(self) -> list[str]:
         if not os.path.isdir(self.root):
@@ -71,43 +67,32 @@ class ContentStore:
     def put(self, doc: dict) -> None:
         path = self._shard(doc["id"])
         payload = (json.dumps(doc) + "\n").encode("utf-8")
-        if self._index is None:
-            with open(path, "ab") as f:
+        with self._lock:
+            if self._index is None:
+                with open(path, "ab") as f:
+                    f.write(payload)
+                return
+            with open(path, "a+b") as f:
+                f.seek(0, os.SEEK_END)
+                off = f.tell()
                 f.write(payload)
-            return
-        # The offset and the append must be ONE operation: taking the
-        # size before opening the file left a window where a concurrent
-        # append moved the end, and the recorded offset then pointed
-        # INTO a record (get() returned a truncated doc or raised).
-        with open(path, "a+b") as f:
-            f.seek(0, os.SEEK_END)
-            off = f.tell()
-            f.write(payload)
-        # Last write wins on duplicate ids (append-only shards).
-        self._index[doc["id"]] = (path, off, len(payload))
-        self._shard_sizes[path] = off + len(payload)
+            self._index[doc["id"]] = (path, off, len(payload))
+            self._shard_sizes[path] = off + len(payload)
 
     def save_index(self) -> str:
-        """Persist the in-memory offset index to store/offsets.json.
-
-        Stored as {id: [shard_basename, offset, length]} (basenames, not
-        absolute paths, so the index dir stays relocatable). The record
-        length rides along so a stale offset can be detected on read;
-        the older {id: [shard, offset]} form is still accepted by the
-        loader. Returns the file path.
-        """
-        self._ensure_index()
-        assert self._index is not None
-        out_path = os.path.join(self.root, OFFSETS_FILENAME)
-        serial = {}
-        for doc_id, (path, off, length) in self._index.items():
-            entry = [os.path.basename(path), off]
-            if length is not None:
-                entry.append(length)
-            serial[doc_id] = entry
-        with open(out_path, "w", encoding="utf-8") as f:
-            json.dump(serial, f)
-        return out_path
+        with self._lock:
+            self._ensure_index()
+            assert self._index is not None
+            out_path = os.path.join(self.root, OFFSETS_FILENAME)
+            serial = {}
+            for doc_id, (path, off, length) in self._index.items():
+                entry = [os.path.basename(path), off]
+                if length is not None:
+                    entry.append(length)
+                serial[doc_id] = entry
+            with open(out_path, "w", encoding="utf-8") as f:
+                json.dump(serial, f)
+            return out_path
 
     def _load_persisted_index(self) -> bool:
         """Load store/offsets.json if present. Returns True on success."""
@@ -154,14 +139,14 @@ class ContentStore:
         return sizes
 
     def _ensure_index(self) -> None:
-        """Load persisted offsets.json when present, else scan once."""
-        if self._index is not None:
-            return
-        if self._load_persisted_index():
-            return
-        self._index = {}
-        for path in self._shard_paths():
-            self._scan_shard(path)
+        with self._lock:
+            if self._index is not None:
+                return
+            if self._load_persisted_index():
+                return
+            self._index = {}
+            for path in self._shard_paths():
+                self._scan_shard(path)
 
     def _scan_shard(self, path: str) -> None:
         """(Re-)index one shard, replacing its previous entries."""
@@ -238,36 +223,33 @@ class ContentStore:
         return d
 
     def get(self, doc_id: str) -> dict | None:
-        if doc_id in self._lru:
-            self.stats["hits"] += 1
-            self._lru.move_to_end(doc_id)
-            return self._lru[doc_id]
-        self._ensure_index()
-        assert self._index is not None
-        loc = self._index.get(doc_id)
-        if loc is None:
-            # Not indexed: either absent, or written after the index was
-            # built. The shard size tells the two apart.
-            shard = self._shard(doc_id)
-            if self._shard_changed(shard):
-                self._scan_shard(shard)
-                loc = self._index.get(doc_id)
-            if loc is None:
-                self.stats["misses"] += 1
-                return None
-        path, off, length = loc
-        d = self._read_record(path, off, length, doc_id)
-        if d is None:
-            # Stale offset (shard rebuilt or rewritten): re-index the
-            # shard and try again rather than serving the wrong record.
-            self._scan_shard(path)
+        with self._lock:
+            if doc_id in self._lru:
+                self.stats["hits"] += 1
+                self._lru.move_to_end(doc_id)
+                return self._lru[doc_id]
+            self._ensure_index()
+            assert self._index is not None
             loc = self._index.get(doc_id)
             if loc is None:
-                self.stats["misses"] += 1
-                return None
+                shard = self._shard(doc_id)
+                if self._shard_changed(shard):
+                    self._scan_shard(shard)
+                    loc = self._index.get(doc_id)
+                if loc is None:
+                    self.stats["misses"] += 1
+                    return None
             path, off, length = loc
             d = self._read_record(path, off, length, doc_id)
             if d is None:
-                self.stats["misses"] += 1
-                return None
-        return self._cache(doc_id, d)
+                self._scan_shard(path)
+                loc = self._index.get(doc_id)
+                if loc is None:
+                    self.stats["misses"] += 1
+                    return None
+                path, off, length = loc
+                d = self._read_record(path, off, length, doc_id)
+                if d is None:
+                    self.stats["misses"] += 1
+                    return None
+            return self._cache(doc_id, d)
