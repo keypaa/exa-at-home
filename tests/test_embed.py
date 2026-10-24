@@ -109,3 +109,24 @@ def test_real_embedder_truncates_to_256():
     v = e.encode_queries(["what is a vector database?"])
     assert v.shape == (1, 256) and v.dtype == np.float32
     assert abs(np.linalg.norm(v[0]) - 1.0) < 1e-3
+
+
+@pytest.mark.cloud_only
+def test_real_embedder_encode_docs_shape_order_norm():
+    """GPU/CPU: real ST path produces unit-norm 256-dim docs, in order.
+
+    Complements the Tier-0 stub tests: a typo in max_seq/precision
+    (regression #1 historically) silently breaks normalized output.
+    """
+    e = Embedder(max_seq_length=64, batch_size=2)
+    texts = [
+        "short doc",
+        "a longer synthetic document padding for tokenizerVariation",
+        "tiny",
+    ]
+    v = e.encode_docs(texts)
+    assert v.shape == (3, 256)
+    assert v.dtype == np.float32
+    assert np.allclose(np.linalg.norm(v, axis=1), 1.0, atol=1e-3)
+    # order is preserved (bucket sorting restores it)
+    assert not np.array_equal(v[0], v[1])
