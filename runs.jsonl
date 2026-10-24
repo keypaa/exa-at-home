@@ -1,0 +1,2 @@
+{"item":"1b","milestone":"M9","metric":"docs_per_s","variant":"before","value":636.75,"tokenize_share_pct":50.38,"config":{"n_docs":1000,"batch_size":1024,"max_seq_length":128,"device":"cuda","precision":"float16"},"source":"box-pasted-2026-10-24-before","sha":"254d387"}
+{"item":"1b","milestone":"M9","metric":"docs_per_s","variant":"after_manual_path","value":901.4,"tokenize_share_pct":72.86,"delta_pct":41.6,"config":{"n_docs":1000,"batch_size":1024,"max_seq_length":128,"device":"cuda","precision":"float16"},"source":"box-pasted-2026-10-24-after","sha":"a67f7d8"}
