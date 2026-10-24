@@ -16,11 +16,13 @@ The map of the whole project: [`ROADMAP.md`](ROADMAP.md).
 
 | # | Item | State | Done when |
 |---|------|-------|-----------|
-| 1 | **Embed throughput**: fp16/bf16 + a real batch size + length bucketing + explicit `max_seq_length` | to do | docs/s measured before/after on the 81k toy, row in EXPERIMENTS; GPU memory materially above 3GB |
+| 1 | **Embed throughput**: fp16 + real GPU batch + length bucketing + explicit `max_seq_length` | **done (M8)** | measured 442 → 457 docs/s (+3.4%); **the embedder is CPU-bound, not GPU-bound** (fp16 + 32→1024 batches barely move it). The real lever is pre-tokenizing offline; see item 1b. |
+| 1b | **Embed diagnostic + pre-tokenize**: profile one batch (torch.profiler) to settle CPU-tokenize vs transfer, then tokenize once offline and save token ids → pure-GPU forward passes | to do | docs/s measured; the 1M embed drops from ~37 min to a few minutes |
 | 2 | **Resumable chunked embed** (per-chunk part files, resume from the last complete chunk) | to do | an interrupted 1M embed resumes instead of restarting |
 | 3 | **The four gates** (below) — thresholds + one command | to do | `scripts/gate.py` exits non-zero on a regression; drop budgets pre-registered |
 | 4 | **1M session plan** (written, like E3's) | to do | one paste, pre-registered acceptance criteria, no improvisation |
-| 5 | **1M build** (unranked first-130 WET — the same selection rule as the toy) | to do | index/ built, gate run, 81k-vs-1M comparison reported |
+| 5 | **1M build** (unranked first-130 WET — the same selection rule as the toy) | to do | index/ built, gate run, 81k-vs-1M comparison reported. **Ingest is now the long pole** (2473 docs/s = 6.7 min @1M) — parallelize before 5M |
+| 5b | **Ingest throughput**: parse in worker processes, write shards instead of one file | to do | docs/s measured; 5M ingest under ~5 min |
 | 6 | **1M sweep**: nprobe × top_coarse × K — the scale curve | to do | curves in `runs.jsonl`; the `nprobe × (N/K)` latency model checked against measurement |
 | 7 | **5M build** (stretch) | to do | only if 1M is clean and the box has the disk |
 | 8 | **`lite`/`auto` serving tier** | to do | one switch, both paths benchmarked, frontier plotted |
@@ -58,11 +60,12 @@ Memory/time model for the box (4 CPU, 32 GiB RAM, RTX Pro 6000):
 
 | Docs | vectors (fp32 256d) | WET download | content store | embed @2500 docs/s¹ | RAM risk |
 |---|---|---|---|---|---|
-| 81k (today) | 0.08 GB | 0.3 GB | 0.08 GB | 33 s | none |
-| **1M** | 1.0 GB | ~8 GB | ~1 GB | **7 min** | none |
-| **5M** | 5.1 GB | ~40 GB | ~5 GB | **33 min** | comfortable |
-| 10M | 10.2 GB | ~80 GB | ~10 GB | 67 min | tight (32 GiB) |
-| 20M | 20.4 GB | ~160 GB | ~20 GB | 2.2 h | unsafe on 32 GiB |
+| 81k (today) | 0.08 GB | 0.3 GB | 0.08 GB | **3.5 min** (measured, 389 docs/s) | none |
+| 1M | 1.0 GB | ~8 GB | ~1 GB | **38 min** (at today's 389 docs/s; ~10 min after 1b) | none |
+| **1M** | 1.0 GB | ~8 GB | ~1 GB | see above | none |
+| **5M** | 5.1 GB | ~40 GB | ~5 GB | see above | comfortable |
+| 10M | 10.2 GB | ~80 GB | ~10 GB | see above | comfortable (160GiB) |
+| 20M | 20.4 GB | ~160 GB | ~20 GB | see above | safe (160GiB RAM, 503GB disk) |
 
 ¹ after item 1 — today's 442 docs/s on 3GB of a 96GB GPU leaves 5–8× on
 the table.
