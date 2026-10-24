@@ -51,33 +51,20 @@ class Embedder:
         from sentence_transformers import SentenceTransformer
 
         self.dim = dim
-        # mxbai-large-v1: plain BERT, no custom modeling code, no
-        # trust_remote_code, no xformers (vendor: "No fancy custom code or
-        # trust remote code required"). Chosen 2026-09-14 after Arctic-m-v2.0
-        # proved unloadable (hard xformers assert in its custom modeling
-        # file). truncate_dim=256 uses the model's MRL support; 256-dim
-        # quality is MEASURED by our recall harness, not vendor-claimed.
         self.device = device or ("cuda" if self._is_cuda() else "cpu")
-        self.model = SentenceTransformer(
-            model, truncate_dim=dim, device=self.device
-        )
-        # The model's own max_seq_length (512) is what actually gets
-        # embedded — a `text[:12000]` slice upstream is a no-op beyond
-        # ~2000 characters. Set it explicitly so the number is visible
-        # rather than inherited from the model card.
+        self.model = SentenceTransformer(model, truncate_dim=dim, device=self.device)
         if max_seq_length is not None:
             self.model.max_seq_length = max_seq_length
         self.max_seq_length = int(self.model.max_seq_length)
         # Half precision on CUDA: the single biggest lever (tensor cores).
-        # sentence-transformers 6.0.1 does NOT accept precision='float16'
-        # (its encode() allows only float32/int8/uint8/binary/ubinary), so
-        # fp16 must be achieved by casting the weights — the forward pass
-        # then runs in half without autocast, and _encode() casts back to
-        # float32 for storage.
         if self._is_cuda():
             self.model.half()
         self.precision = "float16" if self._is_cuda() else "float32"
         self.batch_size = batch_size or EMBED_BATCH
+        # Production path tokenizes once and drives the model manually (item 1b).
+        # Tier-0 stubs created via __new__ lack this flag and use the legacy
+        # SentenceTransformer.encode path so their mocks keep working.
+        self._manual = True
 
     def _is_cuda(self) -> bool:
         try:
@@ -88,27 +75,48 @@ class Embedder:
             return False
 
     def _token_lengths(self, texts: list[str]) -> np.ndarray:
-        """Token length of each text (CPU, tokenizer only)."""
         enc = self.model.tokenizer(
             texts, add_special_tokens=True, truncation=True, return_length=True
         )
         return np.asarray(enc["length"], dtype=np.int64)
 
-    def _encode(self, texts: list[str], batch_size: int) -> np.ndarray:
+    def _encode_legacy(self, texts: list[str], batch_size: int) -> np.ndarray:
+        """Tier-0/stub path: delegates to SentenceTransformer.encode."""
         v = self.model.encode(
-            texts,
-            batch_size=batch_size,
-            normalize_embeddings=True,
-            show_progress_bar=False,
-            convert_to_numpy=True,
+            texts, batch_size=batch_size, normalize_embeddings=True,
+            show_progress_bar=False, convert_to_numpy=True,
         )
-        return v[:, : self.dim].astype(np.float32) / (
-            np.linalg.norm(v[:, : self.dim], axis=1, keepdims=True) + 1e-12
+        v = np.asarray(v, dtype=np.float32)[:, : self.dim]
+        v = v / (np.linalg.norm(v, axis=1, keepdims=True) + 1e-12)
+        return v
+
+    def _encode(self, texts: list[str], batch_size: int) -> np.ndarray:
+        if not texts:
+            return np.zeros((0, self.dim), dtype=np.float32)
+        if not getattr(self, "_manual", False):
+            return self._encode_legacy(texts, batch_size)
+        import torch
+
+        # Tokenize ONCE (the lever from item 1b: item 1b measured 50.4% of
+        # wall time spent re-running the tokenizer inside model.encode).
+        features = self.model.tokenizer(
+            texts, padding=True, truncation=True,
+            max_length=self.max_seq_length, return_tensors="pt",
         )
+        dev = self.device
+        out_chunks: list[torch.Tensor] = []
+        with torch.no_grad():
+            for start in range(0, len(texts), batch_size):
+                end = start + batch_size
+                batch = {k: v[start:end].to(dev) for k, v in features.items()}
+                res = self.model(batch)
+                out_chunks.append(res["sentence_embedding"].detach().cpu())
+        arr = torch.cat(out_chunks, dim=0).numpy().astype(np.float32)
+        arr = arr[:, : self.dim]
+        arr = arr / (np.linalg.norm(arr, axis=1, keepdims=True) + 1e-12)
+        return arr
 
     def encode_queries(self, texts: list[str]) -> np.ndarray:
-        """One query at a time (serving path): no bucketing, no sorting —
-        the extra work would only add latency."""
         return self._encode(texts, batch_size=1)
 
     def encode_docs(
@@ -117,13 +125,6 @@ class Embedder:
         batch_size: int | None = None,
         sort_by_length: bool = True,
     ) -> np.ndarray:
-        """Bulk document encoding (offline path).
-
-        Length bucketing: pages vary hugely in length, and every batch is
-        padded to its longest member. Sorting by length cuts that waste.
-        The OUTPUT is restored to the input order — a silent reorder would
-        corrupt every vector (and the index built from them).
-        """
         if not texts:
             return np.zeros((0, self.dim), dtype=np.float32)
         bs = batch_size or self.batch_size
