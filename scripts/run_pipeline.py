@@ -194,93 +194,22 @@ def stage_embed(
     force: bool = False,
     verbose: bool = False,
     show_progress: bool = False,
+    resume: bool = True,
 ) -> tuple:
-    """docs.jsonl -> vecs.npy + ids.json (real Embedder; GPU box only).
+    """Resumable wrapper around scripts.embed_resumable.run_embed (item 2)."""
+    from scripts.embed_resumable import run_embed
 
-    The corpus is STREAMED: the docs are read in `batch`-sized chunks and
-    embedded chunk by chunk, so the whole corpus is never held in RAM as
-    Python dicts (at 5M docs that is multiple GB of text — an order of
-    magnitude more than the JSONL itself). The vectors are written through
-    a numpy memmap, so even the n×256 float32 output never has to fit in
-    RAM at once.
-
-    Returns (shape, dtype) — unchanged.
-    """
-    import numpy as np
-
-    from exa_home.embed import Embedder
-
-    t0 = time.perf_counter()
-    if _skip(vecs_path, force) and _skip(ids_path, force):
-        v = np.load(vecs_path, mmap_mode="r")
-        if verbose:
-            print(f"[embed] reusing {vecs_path} {v.shape}", flush=True)
-        return v.shape, str(v.dtype)
-    emb = Embedder()
-    n_docs = _count_lines(docs_path)
-    if n_docs == 0:
-        raise ValueError(f"{docs_path}: no documents to embed")
-    tmp_vecs = vecs_path + ".tmp.npy"
-    tmp_ids = ids_path + ".tmp"
-    mm = None
-    rows = 0
-    ids_written = 0
-    dim = 0
-    dtype = None
-
-    def flush(texts: list[str], ids: list[str]) -> None:
-        """Embed one chunk into the memmap + append its ids."""
-        nonlocal mm, rows, ids_written, dim, dtype
-        vecs = emb.encode_docs(texts, batch_size=batch)
-        if mm is None:
-            dim = int(vecs.shape[1])
-            dtype = vecs.dtype
-            mm = np.lib.format.open_memmap(
-                tmp_vecs,
-                mode="w+",
-                dtype=dtype,
-                shape=(n_docs, dim),
-            )
-        mm[rows : rows + len(vecs)] = vecs
-        rows += len(vecs)
-        for doc_id in ids:
-            fid.write(("" if ids_written == 0 else ",") + json.dumps(doc_id))
-            ids_written += 1
-
-    try:
-        from scripts.jsonl import read_jsonl
-
-        with open(tmp_ids, "w", encoding="utf-8") as fid:
-            fid.write("[")
-            chunk_texts: list[str] = []
-            chunk_ids: list[str] = []
-            for d in read_jsonl(docs_path):
-                chunk_texts.append(d["text"][:12000])
-                chunk_ids.append(d["id"])
-                if len(chunk_texts) < chunk:
-                    continue
-                flush(chunk_texts, chunk_ids)
-                chunk_texts, chunk_ids = [], []
-                if show_progress:
-                    print(f"[embed] {rows}/{n_docs} docs", flush=True)
-            if chunk_texts:
-                flush(chunk_texts, chunk_ids)
-            fid.write("]")
-        if mm is None:
-            raise ValueError(f"{docs_path}: no documents to embed")
-        if rows != n_docs:
-            raise ValueError(f"{docs_path}: embedded {rows} docs, expected {n_docs}")
-        mm.flush()
-        del mm
-        os.replace(tmp_vecs, vecs_path)
-        os.replace(tmp_ids, ids_path)
-    finally:
-        for tmp in (tmp_vecs, tmp_ids):
-            if os.path.exists(tmp):
-                os.remove(tmp)
-    shape = (n_docs, dim)
-    _log("embed", t0, f" ({shape} {dtype})")
-    return shape, str(dtype)
+    return run_embed(
+        docs_path,
+        vecs_path,
+        ids_path,
+        batch=batch,
+        chunk=chunk,
+        force=force,
+        verbose=verbose,
+        show_progress=show_progress,
+        resume=resume,
+    )
 
 
 def stage_index(
@@ -525,9 +454,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--docs", required=True)
     p.add_argument("--out", required=True)
     p.add_argument("--ids", required=True)
+    p.add_argument("--resume", action="store_true", default=True)
+    p.add_argument("--no-resume", dest="resume", action="store_false")
     p.set_defaults(
         fn=lambda a: stage_embed(
-            a.docs, a.out, a.ids, a.batch, a.chunk, a.force, a.verbose, a.verbose
+            a.docs, a.out, a.ids, a.batch, a.chunk, a.force, a.verbose, a.verbose,
+            resume=a.resume,
         )
     )
 
