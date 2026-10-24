@@ -80,16 +80,21 @@ class Reranker:
 
         Returns None when the call timed out or failed.
         """
-        pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        pool = getattr(self, "_pool", None)
+        if pool is None:
+            pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+            self._pool = pool
         try:
             fut = pool.submit(self._score_batch, query, texts)
             return fut.result(timeout=timeout_ms / 1000)
-        except Exception:  # noqa: BLE001 — any failure degrades, never raises
+        except Exception:  # noqa: BLE001
+            old = self._pool
+            self._pool = None
+            try:
+                old.shutdown(wait=False, cancel_futures=True)
+            except Exception:  # noqa: BLE001, S110
+                pass
             return None
-        finally:
-            # wait=False: do not block on the abandoned worker.
-            # cancel_futures: drop anything still queued behind it.
-            pool.shutdown(wait=False, cancel_futures=True)
 
     def rerank(self, query, candidates):
         if not candidates:
