@@ -161,9 +161,16 @@ yet and no CI step runs it** — the gate is currently manual/cloud-only.
 - [x] Store offset-index at build time, observability split, run ledger
 - [x] Columnar slice fix, RUNBOOK↔pipeline alignment, literate notebook
 - [x] Audit: 3 read-only audits → 3 fix waves (Rust FFI, serving path, pipeline) + a docs truth pass
-- [x] Relevance eval (10 queries, 200 LLM-judge labels) — the reranker is *not* validated
-- [ ] **Decide the reranker's fate** (WORKPLAN D1) — needs a bigger, human-judged eval
-- [ ] 1M density-ranked build (top-130 WET, K=10k) + gate, after the scale blockers
+- [x] Relevance eval (10 queries, 200 LLM-judge labels) — the reranker is relevance-neutral at
+  n=10 (0.350 coarse vs 0.380 reranked precision@10, 3 better / 1 worse)
+- [x] **Decide the reranker's fate** (WORKPLAN D1, 2026-10-21) — **KEEP**. 50 question-based eval:
+  target recall@10 0.740 = 0.740; MRR 0.641 → 0.712 (+0.071, p=0.18, n.s.).
+  Question-vs-prefix behaviour (not a coefficient of the default) determines it.
+- [x] **1 M scale exercise complete on the toy path** — unranked 130 WET, 2.58 M docs,
+  K=10 k, G1 reranked **0.359** (−0.0705 vs 81 k 0.2885), G3 **p50 75.562 / p99 131.151 ms**,
+  exact-note on `--pred` and `topCoarse` 100 is over-budget. G2 0.00 / 0.00 because the 50
+  committed questions are not each re-anchored into the 1 M haystack; **not a drop in
+  quality claim**.
 - [ ] Waterfall tolerance 10%+2ms; optional answer/similar DAG nodes
 
 ## License
