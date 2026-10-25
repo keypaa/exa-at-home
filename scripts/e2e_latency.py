@@ -22,7 +22,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from exa_home.config import OPERATING_POINT
+from exa_home.config import OPERATING_POINT  # noqa: E402
 
 # Spec §7 profile keys from run_search (filter_ms is the measured
 # translate time; the in-scan intersect stays inside ann_ms, so filter
