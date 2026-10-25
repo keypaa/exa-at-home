@@ -59,6 +59,7 @@ def ensure_questions(root: Path) -> dict:
 
 def main(argv: list[str] | None = None) -> int:
     import argparse
+
     import numpy as np
     from ann_core import IvfIndex
 
