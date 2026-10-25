@@ -14,7 +14,7 @@ import json
 import time
 from pathlib import Path
 
-from exa_home.config import EMBEDDER_MODEL, EMBED_BATCH
+from exa_home.config import EMBEDDER_MODEL, EMBED_BATCH  # noqa: E402
 from exa_home.embed import Embedder
 from exa_home.ingest import read_wet
 
