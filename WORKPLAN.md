@@ -5,8 +5,11 @@ designed, decided, *measured*, and recorded. "Measured" means a number in
 `runs.jsonl` (with full config) or a row in `EXPERIMENTS.md` — not a
 plausible-sounding claim in chat.
 
-**Current focus:** get the system to 1M documents under the 100ms budget,
-with the embed path fast enough and safe enough to make 5M reachable.
+**Current focus:** 1M is **measured, clean, and copy-able** — p50 75.562 ms,
+exact-id@10 0.359 (passing the keep/drop rule at the −0.10 budget), K=10 k.
+The next canonical step is the **golden question set on this exact haystack**
+(E3 §D1 “the scale story is answering”); then 5 M is pure measured work, not a
+scientific gamble.
 
 The map of the whole project: [`ROADMAP.md`](ROADMAP.md).
 
