@@ -88,18 +88,18 @@ def main(argv: list[str] | None = None) -> int:
     root = find_repo_root()
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--index", default="index")
+    ap.add_argument("--docs", default=None,
+                    help="docs.jsonl (defaults via infer_docs_path)")
     ap.add_argument("--out", default="eval/e3_result.json")
     args = ap.parse_args(argv)
     index_arg = args.index
     index_dir = Path(index_arg) if Path(index_arg).is_absolute() else (root / index_arg)
+    docs_path = Path(args.docs) if args.docs else infer_docs_path(root, index_dir)
+    if not docs_path.is_absolute():
+        docs_path = root / docs_path
     store = ContentStore(str(index_dir / "store"))
     ann = IvfIndex.load(str(index_dir))
 
-    docs_path = infer_docs_path(root, index_dir)
-    if args.docs is not None:
-        docs_path = Path(args.docs)
-        if not docs_path.is_absolute():
-            docs_path = root / docs_path
     target_file = targets_path_for(docs_path)
     targets = json.loads(target_file.read_text()) if target_file.exists() else sample_targets(root, n=50, docs_path=docs_path, target_file=target_file)
     Qdoc = ensure_questions(root)
