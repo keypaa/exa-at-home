@@ -20,17 +20,34 @@ QUESTIONS = ROOT / "eval" / "questions_toy_20261021.json"
 TARGETS = ROOT / "eval" / "sampled_targets.json"
 
 
+def targets_path_for(docs: Path) -> Path:
+    """One target set per corpus, so stale 4WET targets never get reused."""
+    return ROOT / "eval" / f"sampled_targets.{docs.stem}.json"
+
+
+def infer_docs_path(root: Path, index_dir: Path) -> Path:
+    if (root / "docs.jsonl").is_file():
+        return root / "docs.jsonl"
+    stem = index_dir.name
+    if stem.startswith("index") and (root / ("docs" + stem[len("index"): ] + ".jsonl")).is_file():
+        return root / ("docs" + stem[len("index"): ] + ".jsonl")
+    return root / "docs.jsonl"
+
+
 def find_repo_root() -> Path:
     if os.path.isdir(ROOT / "exa_home"):
         return ROOT
     raise SystemExit(f"repo not found; cwd={os.getcwd()}")
 
 
-def sample_targets(root: Path, n: int = 50) -> list[dict]:
+def sample_targets(root: Path, n: int = 50, docs_path: Path | None = None,
+                    target_file: Path | None = None) -> list[dict]:
+
     def ascii_heavy(s):
         return sum(ch.isascii() for ch in s) / max(1, len(s)) > 0.9
 
-    docs = root / "docs.jsonl"
+    docs = docs_path if docs_path is not None else (root / "docs.jsonl")
+    tf = target_file if target_file is not None else TARGETS
     pool = []
     with open(docs, encoding="utf-8") as f:
         for line in f:
@@ -43,7 +60,8 @@ def sample_targets(root: Path, n: int = 50) -> list[dict]:
     rng = random.Random(20261021)
     picked = rng.sample(pool, n)
     out = [{"n": i, "id": d, "url": u, "text": t} for i, (d, u, t) in enumerate(picked)]
-    TARGETS.write_text(json.dumps(out, indent=1))
+    tf.parent.mkdir(parents=True, exist_ok=True)
+    tf.write_text(json.dumps(out, indent=1))
     return out
 
 
@@ -77,7 +95,13 @@ def main(argv: list[str] | None = None) -> int:
     store = ContentStore(str(index_dir / "store"))
     ann = IvfIndex.load(str(index_dir))
 
-    targets = json.loads(TARGETS.read_text()) if TARGETS.exists() else sample_targets(root)
+    docs_path = infer_docs_path(root, index_dir)
+    if args.docs is not None:
+        docs_path = Path(args.docs)
+        if not docs_path.is_absolute():
+            docs_path = root / docs_path
+    target_file = targets_path_for(docs_path)
+    targets = json.loads(target_file.read_text()) if target_file.exists() else sample_targets(root, n=50, docs_path=docs_path, target_file=target_file)
     Qdoc = ensure_questions(root)
     QQ = Qdoc["questions"]
     Q = [{"question": q["question"], "target_id": targets[q["n"]]["id"]} for q in QQ]
