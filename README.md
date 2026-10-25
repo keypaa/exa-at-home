@@ -181,8 +181,17 @@ python -m exa_home.mcp_server --index index/ --transport http --port 8080 --help
 ```
 
 The server only starts **after** the index has passed `scripts/gate.py` (see below).
-Model weights are cached under `$HF_HOME`/`~/.cache/huggingface`; a cold start
+Model weights are cached under `$HF_HOME` / `~/.cache/huggingface`; a cold start
 downloads ~1.3 GiB for mxbai-embed and ~90 MB for the reranker.
+
+## Measurement status
+
+- **1 M results are pinned** to `runs.jsonl` and `EXPERIMENTS.md` (G1 `0.359`, G3 p50 `75.562`,
+  p99 `131.151 ms`). G2 (target-doc coverage) remains **non-comparable** at 1 M until a fixed
+  50-question set is re-anchored; no 5 M numbers exist yet.
+
+- **5 M runs are deferred** until every PR in the 1 M hardening queue is clean and one
+  **soft gate threshold** document is merged with the measured nprobe curve.
 
 Working plan and open decisions: [`WORKPLAN.md`](WORKPLAN.md).
 The map — what we did, what we're doing, what's next, where it's going: [`ROADMAP.md`](ROADMAP.md).
