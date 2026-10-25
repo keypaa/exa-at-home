@@ -103,7 +103,8 @@ def _doc_source(docs):
         yield lambda: read_jsonl(path)
 
 
-def build(docs: Iterable[dict], out_dir: str, max_terms: int = 50_000) -> dict:
+def build(docs: Iterable[dict], out_dir: str, max_terms: int = 50_000,
+          verbose: bool = False, progress_every: int = 100_000) -> dict:
     """docs (ANY iterable of dicts) -> the filter/ files. Returns the counts.
 
     TWO streaming passes:
@@ -128,9 +129,13 @@ def build(docs: Iterable[dict], out_dir: str, max_terms: int = 50_000) -> dict:
         domains: dict[str, object] = {}
         dates: dict[str, object] = {}
         n_docs = 0
+        if verbose:
+            print("[filter] pass 1: document frequencies", flush=True)
         for d in source():
             i = n_docs
             n_docs += 1
+            if verbose and n_docs % max(1, progress_every) == 0:
+                print(f"  [filter] pass 1: {n_docs} docs", flush=True)
             dom = domain_of(d.get("url", ""))
             if dom:
                 bm = domains.get(dom)
@@ -151,6 +156,8 @@ def build(docs: Iterable[dict], out_dir: str, max_terms: int = 50_000) -> dict:
 
         # Pass 2: the term postings, straight into the bitmaps.
         terms: dict[str, object] = {}
+        if verbose:
+            print("[filter] pass 2: postings", flush=True)
         for i, d in enumerate(source()):
             for t in set(tokenize(d.get("text", ""))):
                 if t in keep:
@@ -158,6 +165,8 @@ def build(docs: Iterable[dict], out_dir: str, max_terms: int = 50_000) -> dict:
                     if bm is None:
                         bm = terms[t] = BitMap()
                     bm.add(i)
+            if verbose and (i + 1) % max(1, progress_every) == 0:
+                print(f"  [filter] pass 2: {i + 1}/{n_docs} docs", flush=True)
 
     counts = {
         "domains": _write_postings(out_dir, "domains", domains),
@@ -174,7 +183,8 @@ def main(docs_path: str, out: str, max_terms: int):
     """docs.jsonl -> filter/. The corpus is streamed (never a list)."""
     from scripts.jsonl import JsonlFile
 
-    build(JsonlFile(docs_path), out, max_terms)
+    build(JsonlFile(docs_path), out, max_terms, verbose=a.verbose,
+         progress_every=max(1, a.progress_every))
 
 
 if __name__ == "__main__":
@@ -182,5 +192,7 @@ if __name__ == "__main__":
     ap.add_argument("--docs", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--max-terms", type=int, default=MAX_TERMS)
+    ap.add_argument("--verbose", action="store_true")
+    ap.add_argument("--progress-every", dest="progress_every", type=int, default=100000)
     a = ap.parse_args()
     main(a.docs, a.out, a.max_terms)

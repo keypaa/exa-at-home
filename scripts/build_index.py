@@ -37,7 +37,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from exa_home.config import CRAWL, MAX_TERMS
+from exa_home.config import CRAWL, MAX_TERMS  # noqa: E402
 
 # Transient score-matrix budget: the centroid-assignment chunk (rows × K
 # float32 scores) stays inside this many bytes.
@@ -177,6 +177,7 @@ def main(
     crawl: str = "CC-MAIN-2026-34",
     verbose: bool = False,
     source: dict | None = None,
+    progress_every: int = 100_000,
 ) -> dict:
     import numpy as np
 
@@ -232,8 +233,8 @@ def main(
         for d in read_jsonl(docs_path):
             cs.put(d)
             n_stored += 1
-            if verbose and n_stored % 100_000 == 0:
-                print(f"store: {n_stored} docs", flush=True)
+            if verbose and n_stored % max(1, progress_every) == 0:
+                print(f"store: {n_stored}/{n} docs", flush=True)
         if n_stored != n:
             raise ValueError(f"{docs_path}: {n_stored} docs vs {n} vecs")
         cs.save_index()
@@ -245,7 +246,9 @@ def main(
         # Streamed: the docs are handed over one at a time (the old code
         # built the whole list first — GBs of text as Python dicts at 5M
         # docs). The filter layout is unchanged.
+        print("[filter] building roaring bitmaps", flush=True)
         build_filter(JsonlFile(docs_path), os.path.join(out, "filter"), max_terms)
+        print("[filter] done", flush=True)
 
     # Manifest LAST so filter/ + store shards are covered by verify.
     # The provenance sidecar is written after it (and any stale copy is
@@ -283,6 +286,7 @@ if __name__ == "__main__":
     )
     ap.add_argument("--max-terms", type=int, default=MAX_TERMS)
     ap.add_argument("--crawl", default=CRAWL)
+    ap.add_argument("--progress-every", dest="progress_every", type=int, default=100000)
     ap.add_argument(
         "--verbose",
         action="store_true",
@@ -301,4 +305,5 @@ if __name__ == "__main__":
         a.max_terms,
         a.crawl,
         verbose=a.verbose,
+        progress_every=max(1, a.progress_every),
     )
