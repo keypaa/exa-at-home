@@ -57,7 +57,8 @@ def ensure_questions(root: Path) -> dict:
     return json.loads(QUESTIONS.read_text())
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    import argparse
     import numpy as np
     from ann_core import IvfIndex
 
@@ -66,8 +67,13 @@ def main() -> int:
     from exa_home.store import ContentStore
 
     root = find_repo_root()
-    index_dir = root / "index"
-    store = ContentStore(str(root / "index" / "store"))
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--index", default="index")
+    ap.add_argument("--out", default="eval/e3_result.json")
+    args = ap.parse_args(argv)
+    index_arg = args.index
+    index_dir = Path(index_arg) if Path(index_arg).is_absolute() else (root / index_arg)
+    store = ContentStore(str(index_dir / "store"))
     ann = IvfIndex.load(str(index_dir))
 
     targets = json.loads(TARGETS.read_text()) if TARGETS.exists() else sample_targets(root)
@@ -120,7 +126,9 @@ def main() -> int:
         "coarse_mrr10": c_mrr, "reranked_mrr10": r_mrr,
         "wins": wins, "losses": losses, "ties": n - wins - losses,
     }
-    out_path = root / "eval" / "e3_result.json"
+    out_path = Path(args.out)
+    if not out_path.is_absolute():
+        out_path = root / out_path
     out_path.write_text(json.dumps(result, indent=1))
     print(f"\nsaved {out_path}")
     return 0
