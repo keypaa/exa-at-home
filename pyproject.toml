@@ -1,7 +1,11 @@
 [project]
 name = "exa-home"
-version = "0.1.0"
+version = "0.9.0"
+description = "Exa-like low-latency neural search at home: CPU binary-quantized vector DB + rerank + MCP."
+license = { text = "Apache-2.0" }
+authors = [{ name = "Keylhan Paumard--Andre" }]
 requires-python = ">=3.11"
+keywords = ["search", "retrieval", "mcp", "gpu", "analytics"]
 dependencies = [
   "numpy>=1.26",
   "warcio>=1.7",
@@ -16,6 +20,12 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["maturin>=1.0", "marimo>=0.25", "plotly>=5.0", "ruff==0.17.0"]
+[project.urls]
+Repository = "https://github.com/keypaa/exa-at-home"
+Roadmap = "https://github.com/keypaa/exa-at-home/blob/main/ROADMAP.md"
+
+[project.scripts]
+exa-home-mcp = "exa_home.mcp_server:main"
 
 [build-system]
 requires = ["hatchling"]

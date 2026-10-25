@@ -166,6 +166,24 @@ yet and no CI step runs it** — the gate is currently manual/cloud-only.
 - [ ] 1M density-ranked build (top-130 WET, K=10k) + gate, after the scale blockers
 - [ ] Waterfall tolerance 10%+2ms; optional answer/similar DAG nodes
 
+## License
+
+Apache 2.0 — see [LICENSE](LICENSE).
+
+## Running the MCP server
+
+```bash
+# stdio (recommended for local agents)
+python -m exa_home.mcp_server --index index/ --port 8000
+
+# HTTP (serve agents over the box)
+python -m exa_home.mcp_server --index index/ --transport http --port 8080 --help
+```
+
+The server only starts **after** the index has passed `scripts/gate.py` (see below).
+Model weights are cached under `$HF_HOME`/`~/.cache/huggingface`; a cold start
+downloads ~1.3 GiB for mxbai-embed and ~90 MB for the reranker.
+
 Working plan and open decisions: [`WORKPLAN.md`](WORKPLAN.md).
 The map — what we did, what we're doing, what's next, where it's going: [`ROADMAP.md`](ROADMAP.md).
 Spec: `zenno/specs/2026-09-13-exa-at-home-design.md` · historical plan:

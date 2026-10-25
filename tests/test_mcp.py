@@ -130,3 +130,21 @@ def test_home_contents_not_found_and_truncation():
     assert by_id["nope"] == {"id": "nope", "error": "not_found"}
     assert by_id["d0"]["url"] == "https://example.com/0"
     assert len(by_id["d0"]["text"]) <= 10
+
+
+def test_home_health_reports_degraded_entities_when_unwired():
+    from exa_home.mcp_server import home_health
+
+    h = home_health()
+    assert h["status"] in ("ok", "degraded")
+    assert set(h["deps"]) == {"embedder", "ann", "reranker", "store"}
+    assert "operating_point" in h
+
+
+def test_home_health_reports_ok_after_wire():
+    from exa_home import mcp_server
+
+    e, a, r, s = object(), object(), object(), object()
+    mcp_server.wire(e, a, r, s)
+    assert mcp_server.home_health()["status"] == "ok"
+    mcp_server._deps.clear()  # keep tests independent

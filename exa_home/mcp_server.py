@@ -41,6 +41,7 @@ def _get_app():
         # fastmcp); registering them here keeps the MCP surface identical.
         _app.tool(home_search)
         _app.tool(home_contents)
+    _app.tool(home_health)
     return _app
 
 
