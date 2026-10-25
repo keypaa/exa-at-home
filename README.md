@@ -8,9 +8,21 @@ Target box: RTX PRO 6000 Blackwell (96GB VRAM), 160GB RAM. ANN stays on CPU
 on purpose — faithful to how Exa does it; the GPU serves query embedding +
 rerank only.
 
-**Toy result (81k real Common Crawl pages, CC-MAIN-2026-34): p50 43.7ms vs
-the 100ms budget — PASS.** Ledger-backed (`runs.jsonl`, 2026-10-21, np8 /
-tc50 / pt64 / b32): **p50 43.67ms, recall@10 = 0.2885.**
+**1 M result (2 576 778 indexed docs, 130 WET, K=10 000, cc-main 2026-34): total
+p50 75.562 ms / p99 131.151 ms vs the 100 ms budget — PASS.** Ledger-backed:
+**G1 0.359 vs ≥ 0.1885**, **G3 p50 75.562, G4 advisory 0.350/0.380.**
+The G2 question-coverage baseline measured on this corpus is not comparable
+to the toy (see `eval/e3_result_box_2026-10-25.json`). Previous toy result was
+43.67 ms (81 k docs, np8 / tc50 / pt64 / b32).
+
+**On question-like queries** (50 natural questions, known target pages):
+target recall@10 **0.740** either way, target MRR@10 **0.641 → 0.712** with
+the cross-encoder, no degradations — so the reranker **stays** (the
+pre-registered rule fired; the effect is favourable but not significant at
+n=50). The earlier "the reranker hurts" reading came from measuring it with
+document prefixes instead of questions — see [`EXPERIMENTS.md`](EXPERIMENTS.md)
+M5/M5f/M5h and [`LEARNINGS.md`](LEARNINGS.md) §4, §13–14. The plan lives in
+[`WORKPLAN.md`](WORKPLAN.md).
 
 **On question-like queries** (50 natural questions, known target pages):
 target recall@10 **0.740** either way, target MRR@10 **0.641 → 0.712** with
