@@ -132,7 +132,9 @@ def stage_ingest(
         files = wet_files(wet_dir)
         if verbose:
             print(f"[ingest] {len(files)} WET files", flush=True)
-        for p in files:
+        for i, p in enumerate(files, 1):
+            if verbose:
+                print(f"[ingest] WET file {i}/{len(files)}: {os.path.basename(p)}", flush=True)
             yield from read_wet(p)
 
     tmp = docs_path + ".tmp"

@@ -103,12 +103,21 @@ def read_wet(path: str) -> Iterator[RawDoc]:
             )
 
 
-def write_docs_jsonl(docs: Iterator[RawDoc], out_path: str) -> IngestStats:
+def write_docs_jsonl(docs: Iterator[RawDoc], out_path: str,
+                     progress_every: int = 50_000) -> IngestStats:
     from collections import Counter
 
     stats, reasons, seen = IngestStats(), Counter(), set()
+    n_processed = 0
     with open(out_path, "w", encoding="utf-8") as f:
         for d in docs:
+            n_processed += 1
+            if progress_every and n_processed % progress_every == 0:
+                print(
+                    f"[ingest] records={n_processed} kept={stats.kept} "
+                    f"skipped={stats.skipped}",
+                    flush=True,
+                )
             if d.error:
                 # The reader could not turn this record into a document:
                 # count it, or the loss never shows up in the stats.
@@ -138,4 +147,10 @@ def write_docs_jsonl(docs: Iterator[RawDoc], out_path: str) -> IngestStats:
             )
             stats.kept += 1
     stats.reasons = dict(reasons)
+    if n_processed:
+        print(
+            f"[ingest] done: {n_processed} records -> {stats.kept} kept, "
+            f"{stats.skipped} skipped",
+            flush=True,
+        )
     return stats
