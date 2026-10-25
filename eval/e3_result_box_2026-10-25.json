@@ -1,0 +1,411 @@
+{
+ "rows": [
+  {
+   "n": 0,
+   "target": "sha1:67fb4dc2b854bdb255a66a7d8cabf152477a8d75",
+   "coarse_pos": 1,
+   "reranked_pos": 1,
+   "degraded": false,
+   "question": "I need corporate gifts for clients \u2014 where can I get custom AirPods Max?"
+  },
+  {
+   "n": 1,
+   "target": "sha1:0d480930adc44d04e5fd7f72ecbbd986f0cf4593",
+   "coarse_pos": 1,
+   "reranked_pos": 1,
+   "degraded": false,
+   "question": "What does a Phase IV pharmaceutical engineering company do, and what areas do its wireless sensors cover?"
+  },
+  {
+   "n": 2,
+   "target": "sha1:723e4cf6e21f44de10d67c91993fae553389c738",
+   "coarse_pos": 1,
+   "reranked_pos": 1,
+   "degraded": false,
+   "question": "I want to study MBBS in Bangladesh as an Indian student \u2014 what are the eligibility requirements and the fees?"
+  },
+  {
+   "n": 3,
+   "target": "sha1:95b06e741b5ca1076664a23a9f839f8a982da096",
+   "coarse_pos": 1,
+   "reranked_pos": 1,
+   "degraded": false,
+   "question": "How much does the Pizza Popeye cost at Pinocchio a Casa, including VAT?"
+  },
+  {
+   "n": 4,
+   "target": "sha1:243ca73c889de14be73c563fb8c817aa8d4cdd0c",
+   "coarse_pos": 0,
+   "reranked_pos": 0,
+   "degraded": false,
+   "question": "Which Brother label maker is sold at Office Depot Costa Rica, and what is the price in colones?"
+  },
+  {
+   "n": 5,
+   "target": "sha1:ae0d42ae2053e9cdbeb4d01ea274e00fa344b943",
+   "coarse_pos": 1,
+   "reranked_pos": 1,
+   "degraded": false,
+   "question": "What degrees and postgraduate programmes does the University of Navarra offer, and how does admission work?"
+  },
+  {
+   "n": 6,
+   "target": "sha1:ced5de1191b567267d6224e0cb5fbf7f2ac47664",
+   "coarse_pos": 1,
+   "reranked_pos": 1,
+   "degraded": false,
+   "question": "How did the WLU football team perform in the 2015 season?"
+  },
+  {
+   "n": 7,
+   "target": "sha1:e9f42e3474e9155ea42221a26eba783b2c1e3e79",
+   "coarse_pos": 8,
+   "reranked_pos": 1,
+   "degraded": false,
+   "question": "Where can I find news about Christian sertanejo singers from Par\u00e1, Brazil?"
+  },
+  {
+   "n": 8,
+   "target": "sha1:a8a1e14d470539fba08a259300e4b218cc2d44fd",
+   "coarse_pos": 0,
+   "reranked_pos": 0,
+   "degraded": false,
+   "question": "Which vehicle models did AutoCar recall in September 2016?"
+  },
+  {
+   "n": 9,
+   "target": "sha1:77f2c48ea2bb015d2833d90305f670a53d66c4fa",
+   "coarse_pos": 1,
+   "reranked_pos": 1,
+   "degraded": false,
+   "question": "Where can I buy a solid regular-fit Calvin Klein cotton shirt for men?"
+  },
+  {
+   "n": 10,
+   "target": "sha1:37b29fce5ab0ac08fc26e3171766533a469b5757",
+   "coarse_pos": 1,
+   "reranked_pos": 1,
+   "degraded": false,
+   "question": "Who is Noah Prokop, and what position does he play for the Lions de Trois-Rivi\u00e8res?"
+  },
+  {
+   "n": 11,
+   "target": "sha1:6384df41d77c41e2d165c4326c53848908fc7c73",
+   "coarse_pos": 1,
+   "reranked_pos": 1,
+   "degraded": false,
+   "question": "How can I reach a tarot reader by phone in New Castle, Pennsylvania, and what does the consultation cost?"
+  },
+  {
+   "n": 12,
+   "target": "sha1:d0d31d3115a90b372edd8e4168486e62503ca3ae",
+   "coarse_pos": 0,
+   "reranked_pos": 0,
+   "degraded": false,
+   "question": "Where can I download a free vector illustration of beige leather armchairs, and what format does it come in?"
+  },
+  {
+   "n": 13,
+   "target": "sha1:0ea710968a5c78692a0555815a74ccd7f946bb84",
+   "coarse_pos": 1,
+   "reranked_pos": 9,
+   "degraded": false,
+   "question": "Which slot machine games are recommended for players in Switzerland in 2024?"
+  },
+  {
+   "n": 14,
+   "target": "sha1:dc94c2a9ecc15abea675701d152d2f4f412dae13",
+   "coarse_pos": 1,
+   "reranked_pos": 1,
+   "degraded": false,
+   "question": "What is the argument of AhleDhikr for honouring the Sunnah?"
+  },
+  {
+   "n": 15,
+   "target": "sha1:64e808b4b6e31e163c8edb9d7ecf7e8d08f974fc",
+   "coarse_pos": 0,
+   "reranked_pos": 0,
+   "degraded": false,
+   "question": "Where is the Burger Fuel restaurant located, and which countries does the TAB Street chain operate in?"
+  },
+  {
+   "n": 16,
+   "target": "sha1:23c620756f9217755bfa39d8b61ace05309cab3a",
+   "coarse_pos": 0,
+   "reranked_pos": 0,
+   "degraded": false,
+   "question": "What are the health benefits of matcha compared with other healthy foods, and how is it produced?"
+  },
+  {
+   "n": 17,
+   "target": "sha1:11f83b3bf1e7076c3fed7938206e914dc5e724e2",
+   "coarse_pos": 0,
+   "reranked_pos": 0,
+   "degraded": false,
+   "question": "What discount is offered on the original IRON hair straighteners for delivery in Vilnius?"
+  },
+  {
+   "n": 18,
+   "target": "sha1:60c8302fcfd1e4d12ec2c1bced2cd40a73f023af",
+   "coarse_pos": 0,
+   "reranked_pos": 0,
+   "degraded": false,
+   "question": "What meals are on the menu at the Kolorowy \u015awiat private kindergarten?"
+  },
+  {
+   "n": 19,
+   "target": "sha1:f53cf1d9de2bde6348cd39b2935910b3b19bf895",
+   "coarse_pos": 1,
+   "reranked_pos": 1,
+   "degraded": false,
+   "question": "How do I register and log in to the Noodlesoft forums so I can see the team listing?"
+  },
+  {
+   "n": 20,
+   "target": "sha1:096e2edc44cb5681963f3758354d60ad595850db",
+   "coarse_pos": 0,
+   "reranked_pos": 0,
+   "degraded": false,
+   "question": "What is the contact information and apartment availability for the Emek Refaim 76/2 studio short-term rental?"
+  },
+  {
+   "n": 21,
+   "target": "sha1:bbc6b108542c8fbd4a63f07e5bd91b77d416e20b",
+   "coarse_pos": 1,
+   "reranked_pos": 1,
+   "degraded": false,
+   "question": "What did Fivetran announce about opening a Sydney office and an APAC data centre?"
+  },
+  {
+   "n": 22,
+   "target": "sha1:b31cccec87e0a260c6d10cfbb0b108171c68d563",
+   "coarse_pos": 1,
+   "reranked_pos": 1,
+   "degraded": false,
+   "question": "What sailing charters are available for hire in Orange Beach?"
+  },
+  {
+   "n": 23,
+   "target": "sha1:6e782ddb1e44e6b13b4633b33b75dedc43323d68",
+   "coarse_pos": 1,
+   "reranked_pos": 1,
+   "degraded": false,
+   "question": "What did Fran Capo and John think of the Hitchcock production they reviewed?"
+  },
+  {
+   "n": 24,
+   "target": "sha1:b1a67658e05625828a88686e595db4e795a187a5",
+   "coarse_pos": 0,
+   "reranked_pos": 0,
+   "degraded": false,
+   "question": "Who runs the South Kensington guest house in Johannesburg, and how long has it been operating?"
+  },
+  {
+   "n": 25,
+   "target": "sha1:f610ab6ac9a602849b2a564f1e1ef0d8e9d0e1c7",
+   "coarse_pos": 0,
+   "reranked_pos": 0,
+   "degraded": false,
+   "question": "What kind of financial tips does the Quiz MCA site publish?"
+  },
+  {
+   "n": 26,
+   "target": "sha1:402d215c00184c0c46768b34c9d7cd15983323be",
+   "coarse_pos": 2,
+   "reranked_pos": 1,
+   "degraded": false,
+   "question": "What does the Trade In Spirits company buy, sell and trade?"
+  },
+  {
+   "n": 27,
+   "target": "sha1:568c7e8e024e0d527b3407680add3d6fe2785c20",
+   "coarse_pos": 1,
+   "reranked_pos": 1,
+   "degraded": false,
+   "question": "What mixing and mastering services does MVDVS offer as an electronic mixing engineer in Worcester?"
+  },
+  {
+   "n": 28,
+   "target": "sha1:2c84a3f33c9cee7ad16fd652ecc10ce4d3f069f0",
+   "coarse_pos": 1,
+   "reranked_pos": 1,
+   "degraded": false,
+   "question": "What model and model year of Lamborghini is this USA starter listing for?"
+  },
+  {
+   "n": 29,
+   "target": "sha1:afe9834d74d054da9292394c9886be998191504c",
+   "coarse_pos": 1,
+   "reranked_pos": 1,
+   "degraded": false,
+   "question": "How do I request disclosure of a record in the Saarbr\u00fccken city archive's digital memorial book?"
+  },
+  {
+   "n": 30,
+   "target": "sha1:7db3fc20ca553c6fd99ed3e20acdd42ba34ec351",
+   "coarse_pos": 3,
+   "reranked_pos": 1,
+   "degraded": false,
+   "question": "What quality titles and rewards does the PiperSpin casino in Belgium offer?"
+  },
+  {
+   "n": 31,
+   "target": "sha1:f3ed4a9970cb05df85bafdd2257600f8867b217d",
+   "coarse_pos": 3,
+   "reranked_pos": 1,
+   "degraded": false,
+   "question": "Which artist recorded the song 'Pace e serenit\u00e0' in 1993?"
+  },
+  {
+   "n": 32,
+   "target": "sha1:1c451f087ac4274da7ae6168dab759afeda10bdf",
+   "coarse_pos": 1,
+   "reranked_pos": 1,
+   "degraded": false,
+   "question": "What did the Police Magazine survey find about flashlights and weapon lights for police officers?"
+  },
+  {
+   "n": 33,
+   "target": "sha1:1f37face184c044cf505e619bd8bced9a1a6dee1",
+   "coarse_pos": 0,
+   "reranked_pos": 0,
+   "degraded": false,
+   "question": "According to EasyApplAI, what can block your CV from getting you an interview?"
+  },
+  {
+   "n": 34,
+   "target": "sha1:586baf22eded6ab8b6c7a78b04d04676246bb7ae",
+   "coarse_pos": 1,
+   "reranked_pos": 1,
+   "degraded": false,
+   "question": "What is the 'Elastinen' event in Tahko on 14 March 2024?"
+  },
+  {
+   "n": 35,
+   "target": "sha1:77b9c8084f95628f906e593454a11528c26970b1",
+   "coarse_pos": 1,
+   "reranked_pos": 1,
+   "degraded": false,
+   "question": "Who wrote The Church Growth Handbook, and what is the paperback price?"
+  },
+  {
+   "n": 36,
+   "target": "sha1:f3d13ef1fc883b9f5781d1d1a81c9aa3e0b6ff68",
+   "coarse_pos": 4,
+   "reranked_pos": 1,
+   "degraded": false,
+   "question": "What were the results of the 2012 regional elections in the Strachujov district?"
+  },
+  {
+   "n": 37,
+   "target": "sha1:ca6a6f2adfd8fcfbd2f003f86e6cb0a3ec68f9aa",
+   "coarse_pos": 3,
+   "reranked_pos": 2,
+   "degraded": false,
+   "question": "What are Lerntheken learning centres and how are they organised for maths and physics teaching?"
+  },
+  {
+   "n": 38,
+   "target": "sha1:997c2fa67ab1c5b16b30fe1807f63c005ad54354",
+   "coarse_pos": 1,
+   "reranked_pos": 1,
+   "degraded": false,
+   "question": "What are the output ratings of the VOLT Polska 10-step smart jump starter?"
+  },
+  {
+   "n": 39,
+   "target": "sha1:1ca3ad4dd8c8b49fc16f736ec89a62f6f2ee9ba8",
+   "coarse_pos": 0,
+   "reranked_pos": 0,
+   "degraded": false,
+   "question": "What is the Undervisningsklinik NoVa in \u00d6sterbotten for teaching staff?"
+  },
+  {
+   "n": 40,
+   "target": "sha1:de60c39139d18856f835fc42ad5e169201605b16",
+   "coarse_pos": 1,
+   "reranked_pos": 1,
+   "degraded": false,
+   "question": "How do I reserve a playroom for puppy playtime at the Furry Babies Aurora Samoyed puppies?"
+  },
+  {
+   "n": 41,
+   "target": "sha1:d5d7cf2c78b5c3caf8bc916e3658f20be1eea4b4",
+   "coarse_pos": 1,
+   "reranked_pos": 1,
+   "degraded": false,
+   "question": "What does the Checkout Gateway for IRIS WordPress plugin do, and what does it support?"
+  },
+  {
+   "n": 42,
+   "target": "sha1:077e90b84d0bbd32fcd82a48132d5e28abdd9179",
+   "coarse_pos": 1,
+   "reranked_pos": 1,
+   "degraded": false,
+   "question": "What is the Creativity Challenge at FH Ober\u00f6sterreich?"
+  },
+  {
+   "n": 43,
+   "target": "sha1:7d64777f00546d245dd04fdc863886c79f52dbf7",
+   "coarse_pos": 1,
+   "reranked_pos": 1,
+   "degraded": false,
+   "question": "Why is China still burning coal despite leading the world in renewables?"
+  },
+  {
+   "n": 44,
+   "target": "sha1:f5032368f845e07e61f51f55073f9c35911c9d34",
+   "coarse_pos": 1,
+   "reranked_pos": 1,
+   "degraded": false,
+   "question": "What are the term dates for the primary school in Wewelsfleth?"
+  },
+  {
+   "n": 45,
+   "target": "sha1:10a97028f8eb0862fb2564ade4b54a70d7a0a52f",
+   "coarse_pos": 1,
+   "reranked_pos": 1,
+   "degraded": false,
+   "question": "What does the APOVITAL pharmacy magazine say about chlorhexidine?"
+  },
+  {
+   "n": 46,
+   "target": "sha1:630c7c46612b95318396bafd0521206afe24de94",
+   "coarse_pos": 1,
+   "reranked_pos": 1,
+   "degraded": false,
+   "question": "What are the Pok\u00e9mon Fire and Fighting type stickers by OUSIA, and how can I pre-order them?"
+  },
+  {
+   "n": 47,
+   "target": "sha1:5c4d9f1541e0dddcf7d9b68c2afb3d950eef5c61",
+   "coarse_pos": 1,
+   "reranked_pos": 1,
+   "degraded": false,
+   "question": "What does Agree Auto Sales offer customers in Warren, Ohio?"
+  },
+  {
+   "n": 48,
+   "target": "sha1:f450cb93d38608fc593f5c0e1cb61d61818402c1",
+   "coarse_pos": 6,
+   "reranked_pos": 18,
+   "degraded": false,
+   "question": "What does the German army's officer counselling service offer applicants?"
+  },
+  {
+   "n": 49,
+   "target": "sha1:42e93f6701f00074d8a6ce83a1d56710d9aa46ef",
+   "coarse_pos": 37,
+   "reranked_pos": 1,
+   "degraded": false,
+   "question": "What health, nutrition and family topics does this family health blog cover?"
+  }
+ ],
+ "coarse_recall10": 0.74,
+ "reranked_recall10": 0.74,
+ "coarse_mrr10": 0.6408333333333333,
+ "reranked_mrr10": 0.7122222222222223,
+ "wins": 1,
+ "losses": 1,
+ "ties": 48
+}

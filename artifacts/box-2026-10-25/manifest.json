@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "has_filter": true,
+  "schema": {
+    "version": 1,
+    "dim": 256,
+    "code_bytes": 32,
+    "files": {
+      "manifest": "manifest.json",
+      "centroids": "centroids.f32",
+      "codes": "codes.bin",
+      "lists": "lists.bin",
+      "doc_ids": "doc_ids.json"
+    },
+    "centroids": {
+      "dtype": "float32",
+      "endian": "little",
+      "shape": [
+        "K",
+        256
+      ]
+    },
+    "codes": {
+      "packing": "sign-bit",
+      "bytes_per_row": 32,
+      "bitorder": "little"
+    },
+    "lists": {
+      "int": "u32",
+      "endian": "little",
+      "layout": "u32 K, then per list: u32 len + len\u00d7u32 row ids"
+    },
+    "doc_ids": {
+      "format": "json-list",
+      "order": "row"
+    }
+  },
+  "dim": 256,
+  "n_docs": 2576778,
+  "n_centroids": 10000,
+  "crawl": "CC-MAIN-2026-34",
+  "files": {
+    "centroids.f32": "3ed5cd995f180c05f20ad922b7e103940220b252e73fec347d0b5935d7c3b22f",
+    "codes.bin": "513bd86000bc62cbe573a3628126a4bbccaacd9ebb259e6d9a1431607b1f74b2",
+    "doc_ids.json": "59945852946c11446d042ba86dd2f8a7b1e4781379f957d6765eafe30d2b13aa",
+    "filter/dates.bin": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "filter/dates.json": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "filter/domains.bin": "09d48bf3b07188613c35cd8f048570af850b614b1fcd8cce2e403df94fec2bf4",
+    "filter/domains.json": "5be9c97fefbf44b91c7ca7689c0293b3dcf73c54b0071e0823c991c50635845d",
+    "filter/filter_stats.json": "1fca38b9d794a5eef3a40300666442189ba269760fb347b419ab65a430ecad4f",
+    "filter/terms.bin": "e1f2afd0d15d7825d6290b56f87015cf1d039dd9a4749bf0cb04375c96a350f5",
+    "filter/terms.json": "ea4c42b17d6b3de5d401f814f8ee82ffa5f4573b0ee479b0094227fe07954616",
+    "lists.bin": "960ffbdc0429385998daab74c6f311699eecb2878774d134aab704f4250c1f89"
+  }
+}
