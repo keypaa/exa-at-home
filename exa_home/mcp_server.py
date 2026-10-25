@@ -19,6 +19,10 @@ from .config import OPERATING_POINT
 _app = None
 _deps: dict = {}  # wired by wire(); populated by main() or by tests
 
+# Bound attacker-cost knobs: a caller can never size an absurd request.
+MAX_QUERY_CHARS = 4096
+MAX_IDS_PER_CONTENTS_CALL = 100
+
 
 def wire(embedder=None, ann=None, reranker=None, store=None):
     """Attach the backends. Called by main() at startup, or by tests."""
@@ -49,6 +53,13 @@ def home_search(
     """Search the corpus. Returns {results, degraded, profile?, error?}."""
     if not query or not query.strip():
         raise ValueError("query must be non-empty")
+    if len(query) > MAX_QUERY_CHARS:
+        raise ValueError(
+            f"query must be <= {MAX_QUERY_CHARS} characters "
+            f"(got {len(query)})"
+        )
+    if top_k <= 0 or top_k > 100:
+        raise ValueError("top_k must be in (0, 100]")
     from .orch import build_search_dag, run_search
 
     dag = build_search_dag(
@@ -73,11 +84,26 @@ def home_search(
         item["title"] = doc.get("title", "") if doc else ""
         enriched.append(item)
     res["results"] = enriched
+    # do not expose the underlying exception detail over the MCP boundary
+    err = res.get("error")
+    if isinstance(err, dict):
+        err = dict(err)
+        err["error"] = "internal error (see server logs)"
+        res["error"] = err
     return res
 
 
 def home_contents(ids: list[str], max_chars_per_doc: int = 8000) -> dict:
     """Fetch stored text for the given doc ids (paginated, 20 per call)."""
+    if not ids or not isinstance(ids, (list, tuple)):
+        raise ValueError("ids must be a non-empty list of store keys")
+    if len(ids) > MAX_IDS_PER_CONTENTS_CALL:
+        raise ValueError(
+            f"ids must be <= {MAX_IDS_PER_CONTENTS_CALL} per call "
+            f"(got {len(ids)})"
+        )
+    if max_chars_per_doc <= 0 or max_chars_per_doc > 200_000:
+        raise ValueError("max_chars_per_doc must be in (0, 200000]")
     if not ids:
         raise ValueError("ids must be non-empty")
     page, rest = ids[:20], ids[20:]
@@ -144,3 +170,16 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+def home_health() -> dict:
+    """Pure, dependency-checking health probe for operators."""
+    out = {"status": "ok", "deps": {k: v is not None for k, v in {
+        "embedder": _deps.get("embedder", None),
+        "ann": _deps.get("ann", None),
+        "reranker": _deps.get("reranker", None),
+        "store": _deps.get("store", None),
+    }.items()}, "operating_point": dict(OPERATING_POINT)}
+    if not all(out["deps"].values()):
+        out["status"] = "degraded"
+    return out
