@@ -68,14 +68,29 @@ class Reranker:
         ).tolist()
 
     def _score(self, query, texts, timeout_ms):
-        pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        """Run `_score_batch` under a one-shot pool, bounded by timeout_ms.
+
+        The pool is abandoned (never joined) on timeout so a slow/hung model
+        call cannot keep the request hanging. Healthy calls reuse the same
+        worker to avoid executor-spawn cost; a timed-out worker is replaced
+        so later queries cannot queue behind it.
+        """
+        pool = getattr(self, "_pool", None)
+        if pool is None:
+            pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+            self._pool = pool
         try:
             fut = pool.submit(self._score_batch, query, texts)
             return fut.result(timeout=timeout_ms / 1000)
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001 — any failure degrades, never raises
+            old = self._pool
+            self._pool = None
+            try:
+                if old is not None:
+                    old.shutdown(wait=False, cancel_futures=True)
+            except Exception:  # noqa: BLE001, S110 — teardown is best-effort
+                pass
             return None
-        finally:
-            pool.shutdown(wait=False, cancel_futures=True)
 
     def rerank(self, query, candidates):
         if not candidates:
