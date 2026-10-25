@@ -39,7 +39,7 @@ def _():
                     return base
                 try:
                     kids = sorted(os.listdir(base))
-                except Exception:  # noqa: BLE001, S110
+                except Exception:  # noqa: BLE001, S112
                     continue
                 for child in kids[:50]:
                     full = os.path.join(base, child)
