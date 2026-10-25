@@ -64,6 +64,7 @@ def run_embed(
     verbose: bool = False,
     show_progress: bool = False,
     resume: bool = True,
+    progress_every: int = 100_000,
 ) -> tuple:
     import numpy as np
 
@@ -200,8 +201,14 @@ def run_embed(
         ids_fp.flush()
         os.fsync(ids_fp.fileno())
         rows_done += len(vecs)
+        rate = rows_done / max(1e-6, (time.perf_counter() - t0))
+        eta = (n_docs - rows_done) / max(1.0, rate)
         if show_progress or verbose:
-            print(f"[embed] {rows_done}/{n_docs} docs", flush=True)
+            print(
+                f"[embed] {rows_done}/{n_docs} docs  "
+                f"({rate:.1f} docs/s, eta {eta:.0f}s)",
+                flush=True,
+            )
         _commit_state(rows_done)
 
     try:

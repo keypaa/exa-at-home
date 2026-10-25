@@ -114,7 +114,8 @@ def stage_download(
 
 
 def stage_ingest(
-    wet_dir: str, docs_path: str, force: bool = False, verbose: bool = False
+    wet_dir: str, docs_path: str, force: bool = False, verbose: bool = False,
+    progress_every: int = 100_000
 ) -> dict:
     """WET dir -> deduped docs.jsonl (digest-first + URL-second)."""
     from exa_home.ingest import read_wet, write_docs_jsonl
@@ -195,6 +196,7 @@ def stage_embed(
     verbose: bool = False,
     show_progress: bool = False,
     resume: bool = True,
+    progress_every: int = 100_000,
 ) -> tuple:
     """Resumable wrapper around scripts.embed_resumable.run_embed (item 2)."""
     from scripts.embed_resumable import run_embed
@@ -209,6 +211,7 @@ def stage_embed(
         verbose=verbose,
         show_progress=show_progress,
         resume=resume,
+        progress_every=max(1, progress_every),
     )
 
 
@@ -222,6 +225,7 @@ def stage_index(
     use_filter: bool = True,
     force: bool = False,
     verbose: bool = False,
+    progress_every: int = 100_000,
 ) -> dict:
     """vecs + ids + docs -> versioned index/ (centroids, codes, lists, store).
 
@@ -287,6 +291,7 @@ def stage_queries(
     force: bool = False,
     verbose: bool = False,
     embedder=None,
+    progress_every: int = 100_000,
 ) -> dict:
     """docs/vecs/ids -> q.jsonl + gt.jsonl (gate queries + ground truth).
 
@@ -428,6 +433,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--force", action="store_true", help="redo stages even if outputs exist"
     )
     ap.add_argument("--verbose", action="store_true", help="per-stage progress output")
+    ap.add_argument("--progress-every", dest="progress_every", type=int, default=25000,
+                    help="print a progress tick every N emitted rows (0 disables)")
     ap.add_argument(
         "--workers", type=int, default=DOWNLOAD_WORKERS, help="download workers"
     )
@@ -448,7 +455,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("ingest", help="WET dir -> docs.jsonl")
     p.add_argument("--wet", required=True)
     p.add_argument("--out", required=True)
-    p.set_defaults(fn=lambda a: stage_ingest(a.wet, a.out, a.force, a.verbose))
+    p.set_defaults(fn=lambda a: stage_ingest(a.wet, a.out, a.force, a.verbose, progress_every=max(1, a.progress_every)))
 
     p = sub.add_parser("embed", help="docs.jsonl -> vecs.npy + ids.json")
     p.add_argument("--docs", required=True)
@@ -490,7 +497,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--nq", type=int, default=200)
     p.set_defaults(
         fn=lambda a: stage_queries(
-            a.docs, a.vecs, a.ids, a.nq, force=a.force, verbose=a.verbose
+            a.docs, a.vecs, a.ids, a.nq, force=a.force, verbose=a.verbose,
+            progress_every=max(1, a.progress_every)
         )
     )
 
