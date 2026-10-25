@@ -411,17 +411,18 @@ re-run the gate live.
 
 ---
 
-## 16. Immediate next step
+## 16. Immediate next step (post-1 M)
 
-**Item 3: the four gates as one command.** After M9 (+41.6%) and item 2
-(resumable embed, verified on the box at 81380 rows), the embed bottleneck
-and crash-safety are settled. The remaining measurement blocker is that G1–G4
-are defined in prose only, with no threshold and no command. Design
-`scripts/gate.py` (thresholds + drop budgets), land Tier-0 versions, then
-wire it into CI and into the 1M session plan (item 4).
+Use **Lane C work already on branch PRs**, not code changes mid-run:
+- `feat/config-loader-seam` (core contract for one YAML, awaiting merge gate)
+- `perf/ingest-disk-url-dedup` (storage-safe, tested)
+- `refactor/store-thread-safety` (merged but re-pushed)
 
-The pre-tokenize diagnostic (item 1b) closed with a pass; the
-max-seq-length sweep is a follow-up M10 row, **not** a blocker ahead of 1M.
+The M1 policy is **publish first, scale later**: record the -0.10 drop rule,
+the tc100 over-budget gate, and the G2 re-derivation set before starting 5 M.
+
+(Any leftover “fix `gate.py` option” patching on the 1 M data must target
+the 2026-10-25 corpus, not the 81 k artifact set.)
 
 The E3 protocol (for the reranker decision, already decided) lives in
 `eval/E3_PROTOCOL.md`. The next experiment that needs the box is the
