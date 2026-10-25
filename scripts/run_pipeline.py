@@ -140,32 +140,31 @@ def stage_ingest(
     # URL-second dedup + subset exclusion (digest-first is in write_docs_jsonl).
     import re
 
-    from scripts.jsonl import read_jsonl
-
     rx = re.compile(r"robotstxt|crawldiagnostics", re.IGNORECASE)
-    seen: set[str] = set()
     kept = 0
     excluded = 0
     dup_urls = 0
-    with open(docs_path, "w", encoding="utf-8") as fout:
-        for d in read_jsonl(tmp):
-            # The exclusion applies to the URL (and an optional `subset`
-            # field) — NEVER to the whole JSON line: the line carries the
-            # page TEXT, so a page whose body merely mentions robots.txt
-            # was silently dropped from the corpus.
-            url = d.get("url", "")
-            subset = d.get("subset", "")
-            if rx.search(url) or (subset and rx.search(subset)):
-                excluded += 1
-                continue
-            if url in seen:
-                dup_urls += 1
-                continue
-            seen.add(url)
-            fout.write(json.dumps(d) + "\n")
-            kept += 1
-            if verbose and kept % 100_000 == 0:
-                print(f"[ingest] url-dedup: {kept}", flush=True)
+    # Disk-backed URL dedup: sort by URL using 50k-doc chunks (k-way merge),
+    # so memory is bounded to that chunk instead of one set of all URLs
+    # (audit P0: ~660 MB at 5 M URLs).
+    from scripts.ingest_dedup import mark_duplicate_rows
+
+    dup_rows = mark_duplicate_rows(tmp)
+    with open(docs_path, "w", encoding="utf-8") as fout, open(tmp, encoding="utf-8") as fin:
+        for idx, line in enumerate(fin):
+                d = json.loads(line)
+                url = d.get("url", "")
+                subset = d.get("subset", "")
+                if rx.search(url) or (subset and rx.search(subset)):
+                    excluded += 1
+                    continue
+                if dup_rows[idx]:
+                    dup_urls += 1
+                    continue
+                fout.write(json.dumps(d) + "\n")
+                kept += 1
+                if verbose and kept % 100_000 == 0:
+                    print(f"[ingest] url-dedup: {kept}", flush=True)
     os.remove(tmp)
     _log(
         "ingest",
@@ -310,13 +309,12 @@ def stage_queries(
     model.
     """
     t0 = time.perf_counter()
+    from scripts.jsonl import read_jsonl
     if _skip(queries_path, force) and _skip(gt_path, force):
         if verbose:
             print(f"[queries] reusing {queries_path} + {gt_path}", flush=True)
         return {"reused": True}
     from scripts.ground_truth import ground_truth
-    from scripts.jsonl import read_jsonl
-
     # Only the first `nq` docs are needed: read them and stop. The old code
     # materialised the WHOLE corpus as a list of dicts to use docs[:nq].
     docs = list(itertools.islice(read_jsonl(docs_path), nq))
