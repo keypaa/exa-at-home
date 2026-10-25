@@ -58,6 +58,18 @@ def _skip(path: str, force: bool) -> bool:
     return os.path.exists(path) and not force
 
 
+
+def _load_cfg(path):
+    if not path:
+        return {}
+    from exa_home.config_loader import load
+    try:
+        return load(path) or {}
+    except (OSError, RuntimeError, ValueError) as e:
+        print(f"run_pipeline: could not read config {path!r}: {e}", file=sys.stderr)
+        return None
+
+
 def stage_fetch(
     crawl: str, n_wet: int, out: str, force: bool = False, verbose: bool = False
 ) -> list[str]:
@@ -195,6 +207,7 @@ def stage_embed(
     verbose: bool = False,
     show_progress: bool = False,
     resume: bool = True,
+    progress_every: int = 100_000,
 ) -> tuple:
     """Resumable wrapper around scripts.embed_resumable.run_embed (item 2)."""
     from scripts.embed_resumable import run_embed
@@ -209,6 +222,7 @@ def stage_embed(
         verbose=verbose,
         show_progress=show_progress,
         resume=resume,
+        progress_every=max(1, progress_every),
     )
 
 
@@ -422,12 +436,62 @@ def cmd_full(a) -> int:
     return 0
 
 
+def cmd_all(a) -> int:
+    cfg = _load_cfg(a.config or getattr(a, "config", None))
+    if cfg is None:
+        return 2
+
+    wet_files = a.wet_files if a.wet_files is not None else cfg.get("ingest", {}).get("wet_files", 4)
+    k = a.k if a.k is not None else 1024
+    srv = cfg.get("serving", {})
+    verbose = a.verbose or bool(cfg.get("verbose", False))
+    force = a.force
+    workers = a.workers
+    batch = srv.get("batch_size", a.batch)
+    chunk = cfg.get("resilience", {}).get("chunk_size", a.chunk)
+
+    tag = f"{int(wet_files)}wet"
+    urls = f"wet_urls_{tag}.txt"
+    wet_dir = f"data/wet_{tag}"
+    docs = f"docs_{tag}.jsonl"
+    vecs = f"vecs_{tag}.npy"
+    ids = f"ids_{tag}.json"
+    index_dir = f"index_{tag}/"
+    q_path = f"q_{tag}.jsonl"
+    gt_path = f"gt_{tag}.jsonl"
+
+    stage_fetch("CC-MAIN-2026-34", int(wet_files), urls, force=force, verbose=verbose)
+    stage_download(urls, wet_dir, workers=workers, force=force, verbose=verbose)
+    stage_ingest(wet_dir, docs, force=force, verbose=verbose,
+                progress_every=max(1, a.progress_every))
+    stage_embed(docs, vecs, ids, batch, chunk, force=force, verbose=verbose,
+                show_progress=verbose, resume=not force,
+                progress_every=max(1, a.progress_every))
+    stage_index(vecs, ids, docs, index_dir, k=int(k), use_filter=not a.no_filter,
+                force=force, verbose=verbose,
+                progress_every=max(1, a.progress_every))
+    stage_queries(docs, vecs, ids, a.nq, queries_path=q_path, gt_path=gt_path,
+                  force=force, verbose=verbose,
+                  progress_every=max(1, a.progress_every))
+    print(
+        f"all pipeline complete ({wet_files} WET, K={k}): "
+        f"{index_dir} + {q_path} + {gt_path} ready",
+        flush=True,
+    )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument(
         "--force", action="store_true", help="redo stages even if outputs exist"
     )
     ap.add_argument("--verbose", action="store_true", help="per-stage progress output")
+    ap.add_argument(
+        "--config",
+        default=None,
+        help="YAML/JSON overrides (hardware + ingest + serving knobs)",
+    )
     ap.add_argument(
         "--workers", type=int, default=DOWNLOAD_WORKERS, help="download workers"
     )
@@ -501,6 +565,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--wet-files", type=int, required=True)
     p.add_argument("--k", type=int, required=True)
     p.set_defaults(fn=cmd_full)
+
+    p = sub.add_parser("all", help="one config-fed run (fetch -> ingest -> embed -> index -> queries)")
+    p.add_argument("--config", default=None, help="YAML/JSON overrides")
+    p.add_argument("--wet-files", type=int, default=None, help="how many WET files to draw")
+    p.add_argument("--k", type=int, default=None, help="centroids (default 1024 or config)")
+    p.add_argument("--nq", type=int, default=200, help="gate queries")
+    p.add_argument("--no-filter", action="store_true")
+    p.set_defaults(fn=cmd_all)
     return ap
 
 

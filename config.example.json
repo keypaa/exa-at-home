@@ -1,0 +1,10 @@
+{
+  "hardware": {
+    "usable_vram_gb": 96,
+    "usable_ram_gb": 160,
+    "n_cpu": 4
+  },
+  "ingest": { "wet_files": 4, "wet_target_count": null },
+  "serving": { "nprobe": 8, "top_coarse": 50, "k": 10 },
+  "embedding": { "max_seq_length": null }
+}

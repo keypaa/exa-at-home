@@ -64,6 +64,7 @@ def run_embed(
     verbose: bool = False,
     show_progress: bool = False,
     resume: bool = True,
+    progress_every: int = 100_000,
 ) -> tuple:
     import numpy as np
 

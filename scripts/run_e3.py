@@ -60,6 +60,7 @@ def ensure_questions(root: Path) -> dict:
 def main() -> int:
     import numpy as np
     from ann_core import IvfIndex
+
     from exa_home.embed import Embedder
     from exa_home.rerank import Reranker
     from exa_home.store import ContentStore
