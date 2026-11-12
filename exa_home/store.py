@@ -7,6 +7,8 @@ import os
 import threading
 from collections import OrderedDict
 
+from .config import SHARD_COUNT
+
 OFFSETS_FILENAME = "offsets.json"
 
 
@@ -43,7 +45,7 @@ class ContentStore:
     def _shard(self, doc_id: str) -> str:
         return os.path.join(
             self.root,
-            f"shard-{int(hashlib.sha1(doc_id.encode()).hexdigest()[:8], 16) % 64}.jsonl",
+            f"shard-{int(hashlib.sha1(doc_id.encode()).hexdigest()[:8], 16) % SHARD_COUNT}.jsonl",
         )
 
     def begin_bulk(self) -> None:

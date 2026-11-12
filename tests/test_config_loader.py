@@ -5,10 +5,14 @@ from exa_home.config_loader import HardwareProfile, load, normalize
 
 def test_inline_json_overrides_with_presets(tmp_path):
     p = tmp_path / "cfg.json"
-    p.write_text(json.dumps({
-        "hardware": {"usable_vram_gb": 24, "usable_ram_gb": 64, "n_cpu": 8},
-        "serving": {"batch_size": 7, "nprobe": 9},
-    }))
+    p.write_text(
+        json.dumps(
+            {
+                "hardware": {"usable_vram_gb": 24, "usable_ram_gb": 64, "n_cpu": 8},
+                "serving": {"batch_size": 7, "nprobe": 9},
+            }
+        )
+    )
     cfg = load(p)
     assert cfg["hardware_profile"] == "rtx-3090-classic"
     assert cfg["operating_point"]["batch_size"] == 7

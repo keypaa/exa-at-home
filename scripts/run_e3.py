@@ -4,6 +4,7 @@ Wraps eval/E3_PROTOCOL.md steps 1 + 3 into one reproducible entry point so
 the G2 answer-coverage gate can be re-run after any index/corpus change.
 Writes eval/e3_result.json.
 """
+
 from __future__ import annotations
 
 import json
@@ -29,8 +30,11 @@ def infer_docs_path(root: Path, index_dir: Path) -> Path:
     if (root / "docs.jsonl").is_file():
         return root / "docs.jsonl"
     stem = index_dir.name
-    if stem.startswith("index") and (root / ("docs" + stem[len("index"): ] + ".jsonl")).is_file():
-        return root / ("docs" + stem[len("index"): ] + ".jsonl")
+    if (
+        stem.startswith("index")
+        and (root / ("docs" + stem[len("index") :] + ".jsonl")).is_file()
+    ):
+        return root / ("docs" + stem[len("index") :] + ".jsonl")
     return root / "docs.jsonl"
 
 
@@ -40,8 +44,12 @@ def find_repo_root() -> Path:
     raise SystemExit(f"repo not found; cwd={os.getcwd()}")
 
 
-def sample_targets(root: Path, n: int = 50, docs_path: Path | None = None,
-                    target_file: Path | None = None) -> list[dict]:
+def sample_targets(
+    root: Path,
+    n: int = 50,
+    docs_path: Path | None = None,
+    target_file: Path | None = None,
+) -> list[dict]:
 
     def ascii_heavy(s):
         return sum(ch.isascii() for ch in s) / max(1, len(s)) > 0.9
@@ -88,8 +96,9 @@ def main(argv: list[str] | None = None) -> int:
     root = find_repo_root()
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--index", default="index")
-    ap.add_argument("--docs", default=None,
-                    help="docs.jsonl (defaults via infer_docs_path)")
+    ap.add_argument(
+        "--docs", default=None, help="docs.jsonl (defaults via infer_docs_path)"
+    )
     ap.add_argument("--out", default="eval/e3_result.json")
     args = ap.parse_args(argv)
     index_arg = args.index
@@ -101,7 +110,11 @@ def main(argv: list[str] | None = None) -> int:
     ann = IvfIndex.load(str(index_dir))
 
     target_file = targets_path_for(docs_path)
-    targets = json.loads(target_file.read_text()) if target_file.exists() else sample_targets(root, n=50, docs_path=docs_path, target_file=target_file)
+    targets = (
+        json.loads(target_file.read_text())
+        if target_file.exists()
+        else sample_targets(root, n=50, docs_path=docs_path, target_file=target_file)
+    )
     Qdoc = ensure_questions(root)
     QQ = Qdoc["questions"]
     Q = [{"question": q["question"], "target_id": targets[q["n"]]["id"]} for q in QQ]
@@ -121,9 +134,16 @@ def main(argv: list[str] | None = None) -> int:
         r50 = [r["id"] for r in ranked]
         c_pos = c50.index(tgt) + 1 if tgt in c50 else 0
         r_pos = r50.index(tgt) + 1 if tgt in r50 else 0
-        rows.append({"n": i, "target": tgt, "coarse_pos": c_pos,
-                     "reranked_pos": r_pos, "degraded": bool(deg),
-                     "question": q["question"]})
+        rows.append(
+            {
+                "n": i,
+                "target": tgt,
+                "coarse_pos": c_pos,
+                "reranked_pos": r_pos,
+                "degraded": bool(deg),
+                "question": q["question"],
+            }
+        )
         print(f"Q{i:<3} coarse_pos={c_pos:<3} reranked_pos={r_pos:<3} deg={deg}")
 
     n = len(rows)
@@ -142,14 +162,19 @@ def main(argv: list[str] | None = None) -> int:
     losses = sum(1 for r in rows if hit(r["coarse_pos"]) and not hit(r["reranked_pos"]))
 
     print(f"\n=== E3 RESULT (n={n}) ===")
-    print(f"target recall@10   coarse={c_hit/n:.3f}   reranked={r_hit/n:.3f}")
+    print(f"target recall@10   coarse={c_hit / n:.3f}   reranked={r_hit / n:.3f}")
     print(f"target MRR@10       coarse={c_mrr:.3f}   reranked={r_mrr:.3f}")
-    print(f"paired: reranker wins {wins} / loses {losses} / ties {n-wins-losses}")
+    print(f"paired: reranker wins {wins} / loses {losses} / ties {n - wins - losses}")
 
     result = {
-        "rows": rows, "coarse_recall10": c_hit / n, "reranked_recall10": r_hit / n,
-        "coarse_mrr10": c_mrr, "reranked_mrr10": r_mrr,
-        "wins": wins, "losses": losses, "ties": n - wins - losses,
+        "rows": rows,
+        "coarse_recall10": c_hit / n,
+        "reranked_recall10": r_hit / n,
+        "coarse_mrr10": c_mrr,
+        "reranked_mrr10": r_mrr,
+        "wins": wins,
+        "losses": losses,
+        "ties": n - wins - losses,
     }
     out_path = Path(args.out)
     if not out_path.is_absolute():

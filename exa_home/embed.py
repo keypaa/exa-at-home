@@ -83,8 +83,11 @@ class Embedder:
     def _encode_legacy(self, texts: list[str], batch_size: int) -> np.ndarray:
         """Tier-0/stub path: delegates to SentenceTransformer.encode."""
         v = self.model.encode(
-            texts, batch_size=batch_size, normalize_embeddings=True,
-            show_progress_bar=False, convert_to_numpy=True,
+            texts,
+            batch_size=batch_size,
+            normalize_embeddings=True,
+            show_progress_bar=False,
+            convert_to_numpy=True,
         )
         v = np.asarray(v, dtype=np.float32)[:, : self.dim]
         v = v / (np.linalg.norm(v, axis=1, keepdims=True) + 1e-12)
@@ -100,8 +103,11 @@ class Embedder:
         # Tokenize ONCE (the lever from item 1b: item 1b measured 50.4% of
         # wall time spent re-running the tokenizer inside model.encode).
         features = self.model.tokenizer(
-            texts, padding=True, truncation=True,
-            max_length=self.max_seq_length, return_tensors="pt",
+            texts,
+            padding=True,
+            truncation=True,
+            max_length=self.max_seq_length,
+            return_tensors="pt",
         )
         dev = self.device
         out_chunks: list[torch.Tensor] = []

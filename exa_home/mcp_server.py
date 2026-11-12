@@ -56,8 +56,7 @@ def home_search(
         raise ValueError("query must be non-empty")
     if len(query) > MAX_QUERY_CHARS:
         raise ValueError(
-            f"query must be <= {MAX_QUERY_CHARS} characters "
-            f"(got {len(query)})"
+            f"query must be <= {MAX_QUERY_CHARS} characters (got {len(query)})"
         )
     if top_k <= 0 or top_k > 100:
         raise ValueError("top_k must be in (0, 100]")
@@ -100,8 +99,7 @@ def home_contents(ids: list[str], max_chars_per_doc: int = 8000) -> dict:
         raise ValueError("ids must be a non-empty list of store keys")
     if len(ids) > MAX_IDS_PER_CONTENTS_CALL:
         raise ValueError(
-            f"ids must be <= {MAX_IDS_PER_CONTENTS_CALL} per call "
-            f"(got {len(ids)})"
+            f"ids must be <= {MAX_IDS_PER_CONTENTS_CALL} per call (got {len(ids)})"
         )
     if max_chars_per_doc <= 0 or max_chars_per_doc > 200_000:
         raise ValueError("max_chars_per_doc must be in (0, 200000]")
@@ -175,12 +173,19 @@ if __name__ == "__main__":
 
 def home_health() -> dict:
     """Pure, dependency-checking health probe for operators."""
-    out = {"status": "ok", "deps": {k: v is not None for k, v in {
-        "embedder": _deps.get("embedder", None),
-        "ann": _deps.get("ann", None),
-        "reranker": _deps.get("reranker", None),
-        "store": _deps.get("store", None),
-    }.items()}, "operating_point": dict(OPERATING_POINT)}
+    out = {
+        "status": "ok",
+        "deps": {
+            k: v is not None
+            for k, v in {
+                "embedder": _deps.get("embedder", None),
+                "ann": _deps.get("ann", None),
+                "reranker": _deps.get("reranker", None),
+                "store": _deps.get("store", None),
+            }.items()
+        },
+        "operating_point": dict(OPERATING_POINT),
+    }
     if not all(out["deps"].values()):
         out["status"] = "degraded"
     return out

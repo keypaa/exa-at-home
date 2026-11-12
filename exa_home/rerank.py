@@ -61,8 +61,8 @@ class Reranker:
             pass
 
     def _score_batch(self, query, texts):
-        q = " ".join(query.split()[:self.max_query_tokens])
-        pairs = [[q, " ".join(t.split()[:self.max_pair_tokens])] for t in texts]
+        q = " ".join(query.split()[: self.max_query_tokens])
+        pairs = [[q, " ".join(t.split()[: self.max_pair_tokens])] for t in texts]
         return self.model.predict(
             pairs, batch_size=self.batch_size, show_progress_bar=False
         ).tolist()

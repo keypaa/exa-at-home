@@ -74,16 +74,23 @@ def _():
 def _(ROOT):
     import os
     import sys
+
     sys.path.insert(0, ROOT)
     from scripts.run_pipeline import stage_download, stage_fetch
 
     stage_fetch(
-        "CC-MAIN-2026-34", 130, os.path.join(ROOT, "wet_urls.txt"),
-        force=True, verbose=True,
+        "CC-MAIN-2026-34",
+        130,
+        os.path.join(ROOT, "wet_urls.txt"),
+        force=True,
+        verbose=True,
     )
     stage_download(
-        os.path.join(ROOT, "wet_urls.txt"), os.path.join(ROOT, "data/wet_130wet"),
-        workers=16, force=True, verbose=True,
+        os.path.join(ROOT, "wet_urls.txt"),
+        os.path.join(ROOT, "data/wet_130wet"),
+        workers=16,
+        force=True,
+        verbose=True,
     )
     print("DONE: fetch + download")
 
@@ -92,6 +99,7 @@ def _(ROOT):
 def _(ROOT):
     import os
     import sys
+
     sys.path.insert(0, ROOT)
     from scripts.run_pipeline import stage_ingest
 
@@ -105,6 +113,7 @@ def _(ROOT):
 def _(ROOT):
     import os
     import sys
+
     sys.path.insert(0, ROOT)
     from scripts.run_pipeline import stage_embed
 
@@ -112,8 +121,15 @@ def _(ROOT):
     vecs = os.path.join(ROOT, "vecs_130wet.npy")
     ids = os.path.join(ROOT, "ids_130wet.json")
     shape, dtype = stage_embed(
-        docs, vecs, ids, batch=1024, chunk=8192,
-        force=True, verbose=True, show_progress=True, resume=True,
+        docs,
+        vecs,
+        ids,
+        batch=1024,
+        chunk=8192,
+        force=True,
+        verbose=True,
+        show_progress=True,
+        resume=True,
     )
     print("EMBED DONE:", shape, dtype)
 
@@ -122,6 +138,7 @@ def _(ROOT):
 def _(ROOT):
     import os
     import sys
+
     sys.path.insert(0, ROOT)
     from scripts.run_pipeline import stage_index
 
@@ -130,7 +147,10 @@ def _(ROOT):
         os.path.join(ROOT, "ids_130wet.json"),
         os.path.join(ROOT, "docs_130wet.jsonl"),
         os.path.join(ROOT, "index_130wet"),
-        k=10000, use_filter=True, force=True, verbose=True,
+        k=10000,
+        use_filter=True,
+        force=True,
+        verbose=True,
     )
     print("INDEX DONE:", shape)
 
@@ -139,6 +159,7 @@ def _(ROOT):
 def _(ROOT):
     import os
     import sys
+
     sys.path.insert(0, ROOT)
     from scripts.run_pipeline import stage_queries
 
@@ -149,7 +170,8 @@ def _(ROOT):
         200,
         queries_path=os.path.join(ROOT, "q_130wet.jsonl"),
         gt_path=os.path.join(ROOT, "gt_130wet.jsonl"),
-        force=True, verbose=True,
+        force=True,
+        verbose=True,
     )
     print("QUERIES/GT DONE:", res)
 
@@ -158,6 +180,7 @@ def _(ROOT):
 def _(ROOT):
     import os
     import sys
+
     sys.path.insert(0, ROOT)
     from scripts.e2e_latency import main as e2e_main
     from scripts.gate import main as gate_main
@@ -165,45 +188,96 @@ def _(ROOT):
     from scripts.sweep import main as sweep_main
 
     base = [
-        "--ann", "ivf", "--index", os.path.join(ROOT, "index_130wet"),
-        "--queries", os.path.join(ROOT, "q_130wet.jsonl"),
-        "--k", "10", "--budget-ms", "100", "--embedder", "real",
-        "--reranker", "real", "--top-coarse", "50",
-        "--max-pair-tokens", "64", "--batch-size", "32",
-        "--max-query-tokens", "32", "--ledger", os.path.join(ROOT, "runs.jsonl"),
+        "--ann",
+        "ivf",
+        "--index",
+        os.path.join(ROOT, "index_130wet"),
+        "--queries",
+        os.path.join(ROOT, "q_130wet.jsonl"),
+        "--k",
+        "10",
+        "--budget-ms",
+        "100",
+        "--embedder",
+        "real",
+        "--reranker",
+        "real",
+        "--top-coarse",
+        "50",
+        "--max-pair-tokens",
+        "64",
+        "--batch-size",
+        "32",
+        "--max-query-tokens",
+        "32",
+        "--ledger",
+        os.path.join(ROOT, "runs.jsonl"),
     ]
     assert e2e_main(base) == 0
     import glob
-    sweep_main([
-        "--index", os.path.join(ROOT, "index_130wet"),
-        "--queries", os.path.join(ROOT, "q_130wet.jsonl"),
-        "--gt", os.path.join(ROOT, "gt_130wet.jsonl"),
-        "--nprobe", "8", "16", "--top-coarse", "50", "100",
-        "--max-pair-tokens", "64", "--batch-size", "32",
-        "--ledger", os.path.join(ROOT, "runs.jsonl"),
-    ])
+
+    sweep_main(
+        [
+            "--index",
+            os.path.join(ROOT, "index_130wet"),
+            "--queries",
+            os.path.join(ROOT, "q_130wet.jsonl"),
+            "--gt",
+            os.path.join(ROOT, "gt_130wet.jsonl"),
+            "--nprobe",
+            "8",
+            "16",
+            "--top-coarse",
+            "50",
+            "100",
+            "--max-pair-tokens",
+            "64",
+            "--batch-size",
+            "32",
+            "--ledger",
+            os.path.join(ROOT, "runs.jsonl"),
+        ]
+    )
     sweeps = sorted(glob.glob(os.path.join(ROOT, "sweeps") + "/*"))
     te = sweeps[-1]
-    rc = gate_main([
-        "--index", os.path.join(ROOT, "index_130wet"),
-        "--queries", os.path.join(ROOT, "q_130wet.jsonl"),
-        "--gt", os.path.join(ROOT, "gt_130wet.jsonl"),
-        "--pred", os.path.join(te, "pred_np8_tc50_pt64_b32.jsonl"),
-        "--e3-result", os.path.join(ROOT, "eval/e3_result.json"),
-        "--budget-ms", "100", "--json",
-        "--ledger", os.path.join(ROOT, "runs.jsonl"),
-    ])
+    rc = gate_main(
+        [
+            "--index",
+            os.path.join(ROOT, "index_130wet"),
+            "--queries",
+            os.path.join(ROOT, "q_130wet.jsonl"),
+            "--gt",
+            os.path.join(ROOT, "gt_130wet.jsonl"),
+            "--pred",
+            os.path.join(te, "pred_np8_tc50_pt64_b32.jsonl"),
+            "--e3-result",
+            os.path.join(ROOT, "eval/e3_result.json"),
+            "--budget-ms",
+            "100",
+            "--json",
+            "--ledger",
+            os.path.join(ROOT, "runs.jsonl"),
+        ]
+    )
     print("GATE EXIT:", rc)
     assert rc == 0
     run_e3_main()
     print("DONE gate+sweep+E3")
 
     import tarfile
+
     out = os.path.join(ROOT, "exa-at-home-handoff.tgz")
     with tarfile.open(out, "w:gz") as t:
-        for p in ["runs.jsonl", "index_130wet", "q_130wet.jsonl", "gt_130wet.jsonl",
-                  "vecs_130wet.npy", "ids_130wet.json",
-                  "eval/e3_result.json", "eval/e3_result_toy_20261021.json"]:
+        for p in [
+            "runs.jsonl",
+            "index_130wet",
+            "q_130wet.jsonl",
+            "gt_130wet.jsonl",
+            "vecs_130wet.npy",
+            "ids_130wet.json",
+            "eval/e3_result.json",
+            "eval/e3_result_toy_20261021.json",
+        ]:
             full = os.path.join(ROOT, p)
             if os.path.exists(full):
                 t.add(full, arcname=p)

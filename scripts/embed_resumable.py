@@ -11,6 +11,7 @@ the old stage_embed (streaming 8192-doc chunks, memmap output) and adds:
   * a `.done` marker + `.provenance.json` so a completed build is reused only
     when source sha and count match
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -91,7 +92,13 @@ def run_embed(
     state_path = vecs_path + ".state.json"
 
     # --- already complete? -------------------------------------------
-    if not force and os.path.exists(vecs_path) and os.path.exists(ids_path) and os.path.exists(done_marker) and os.path.exists(prov_path):
+    if (
+        not force
+        and os.path.exists(vecs_path)
+        and os.path.exists(ids_path)
+        and os.path.exists(done_marker)
+        and os.path.exists(prov_path)
+    ):
         try:
             with open(prov_path, encoding="utf-8") as _pf:
                 prov = json.load(_pf)
@@ -108,10 +115,19 @@ def run_embed(
 
     # --- force wipe ---------------------------------------------------
     if force:
-        _cleanup([
-            vecs_path, ids_path, vecs_part, ids_part, state_path, done_marker,
-            prov_path, ids_path + ".tmp", vecs_path + ".tmp.npy",
-        ])
+        _cleanup(
+            [
+                vecs_path,
+                ids_path,
+                vecs_part,
+                ids_part,
+                state_path,
+                done_marker,
+                prov_path,
+                ids_path + ".tmp",
+                vecs_path + ".tmp.npy",
+            ]
+        )
 
     # --- resume state handling ----------------------------------------
     state = None
@@ -132,18 +148,24 @@ def run_embed(
         else:
             rows = int(state.get("rows", 0))
             if rows % chunk != 0 or rows > n_docs:
-                raise ValueError(f"{state_path}: rows={rows} not on chunk boundary; run --force")
+                raise ValueError(
+                    f"{state_path}: rows={rows} not on chunk boundary; run --force"
+                )
             # ids progress must match rows
             if os.path.exists(ids_part):
                 with open(ids_part, encoding="utf-8") as _if:
                     n_ids = sum(1 for _ in _if)
                 if n_ids != rows:
-                    raise ValueError(f"{ids_part}: {n_ids} ids != {rows} rows; run --force")
+                    raise ValueError(
+                        f"{ids_part}: {n_ids} ids != {rows} rows; run --force"
+                    )
             # memmap shape sanity
             if os.path.exists(vecs_part):
                 mm_test = np.load(vecs_part, mmap_mode="r")
                 if mm_test.shape != (n_docs, 256):
-                    raise ValueError(f"{vecs_part}: shape {mm_test.shape} != ({n_docs}, 256); run --force")
+                    raise ValueError(
+                        f"{vecs_part}: shape {mm_test.shape} != ({n_docs}, 256); run --force"
+                    )
             # fall through to resume with start_rows=rows
 
     rows_start = int(state.get("rows", 0)) if state else 0
@@ -154,7 +176,9 @@ def run_embed(
         _cleanup([vecs_part, ids_part])
     else:
         if not os.path.exists(vecs_part):
-            raise ValueError(f"{vecs_part}: missing while state says rows={rows_start}; run --force")
+            raise ValueError(
+                f"{vecs_part}: missing while state says rows={rows_start}; run --force"
+            )
 
     emb = Embedder()
 
@@ -169,10 +193,16 @@ def run_embed(
             raise ValueError(f"{vecs_part}: bad shape {mm.shape}; run --force")
 
     def _commit_state(r: int) -> None:
-        _atomic_replace_json(state_path, {
-            "n_docs": n_docs, "chunk": chunk, "batch": batch,
-            "source_sha256": src_sha, "rows": r,
-        })
+        _atomic_replace_json(
+            state_path,
+            {
+                "n_docs": n_docs,
+                "chunk": chunk,
+                "batch": batch,
+                "source_sha256": src_sha,
+                "rows": r,
+            },
+        )
 
     # skip already committed rows
     read_iter = read_jsonl(docs_path)
@@ -192,9 +222,12 @@ def run_embed(
         vecs = emb.encode_docs(buf_t, batch_size=batch)
         if mm is None:
             mm = _np.lib.format.open_memmap(
-                vecs_part, mode="w+", dtype=vecs.dtype, shape=(n_docs, vecs.shape[1]),
+                vecs_part,
+                mode="w+",
+                dtype=vecs.dtype,
+                shape=(n_docs, vecs.shape[1]),
             )
-        mm[rows_done: rows_done + len(vecs)] = vecs
+        mm[rows_done : rows_done + len(vecs)] = vecs
         mm.flush()
         # ids
         ids_fp.writelines(json.dumps(doc_id) + "\n" for doc_id in buf_i)
@@ -245,7 +278,10 @@ def run_embed(
 
     # assemble ids.json from the JSONL part (streaming)
     ids_tmp = ids_path + ".tmp"
-    with open(ids_part, encoding="utf-8") as src, open(ids_tmp, "w", encoding="utf-8") as dst:
+    with (
+        open(ids_part, encoding="utf-8") as src,
+        open(ids_tmp, "w", encoding="utf-8") as dst,
+    ):
         dst.write("[")
         first = True
         for line in src:

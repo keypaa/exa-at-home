@@ -99,7 +99,9 @@ def _manifest_entries(index_dir: str, prefix: str = "") -> dict:
         full = os.path.join(index_dir, name)
         rel = f"{prefix}{name}"
         if os.path.isdir(full):
-            if not prefix and name == STORE_DIR:
+            # Exclude the content store at any depth: it is corpus, not
+            # index state, and hashing it made every index load O(corpus).
+            if rel.split("/") and "store" in rel.split("/"):
                 continue
             files.update(_manifest_entries(full, prefix=rel + "/"))
         else:
@@ -110,7 +112,7 @@ def _manifest_entries(index_dir: str, prefix: str = "") -> dict:
 def write_manifest(index_dir: str, meta: dict) -> None:
     has_filter = os.path.isdir(os.path.join(index_dir, "filter"))
     files = _manifest_entries(index_dir)
-    with open(os.path.join(index_dir, MANIFEST), "w") as f:
+    with open(os.path.join(index_dir, MANIFEST), "w", encoding="utf-8") as f:
         json.dump(
             {
                 "version": SCHEMA_VERSION,

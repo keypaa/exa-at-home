@@ -39,10 +39,10 @@ import time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from exa_home.config import OPERATING_POINT  # noqa: E402
+from exa_home.config import OPERATING_POINT
 
 # The ONE home of the recall@10 formula (scripts/measure_recall.py).
-from scripts.measure_recall import recall_at_10 as _recall_at_10  # noqa: E402
+from scripts.measure_recall import recall_at_10 as _recall_at_10
 
 
 def _timestamp() -> str:

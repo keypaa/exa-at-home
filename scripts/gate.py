@@ -10,6 +10,7 @@ G4 (relevance) is reported as an advisory warning and never flips the exit code.
 Tier-0 friendly: ``--synth`` runs the whole gate against deterministic in-memory
 backends in a couple of seconds (no model, no index, no GPU).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -142,8 +143,17 @@ def gate_synthetic(n_docs: int, k: int, budget_ms: float, verbose: bool = False)
     return results
 
 
-def gate_real(index_dir, queries, gt, pred, pred16, e3_result_path, budget_ms,
-              run_g2_e3: bool, verbose: bool):
+def gate_real(
+    index_dir,
+    queries,
+    gt,
+    pred,
+    pred16,
+    e3_result_path,
+    budget_ms,
+    run_g2_e3: bool,
+    verbose: bool,
+):
     from ann_core import IvfIndex
 
     from exa_home.embed import Embedder
@@ -157,7 +167,11 @@ def gate_real(index_dir, queries, gt, pred, pred16, e3_result_path, budget_ms,
     rr = Reranker()
 
     # --- G3 latency ---
-    q_list = [json.loads(line)["query"] for line in Path(queries).read_text().splitlines() if line.strip()]
+    q_list = [
+        json.loads(line)["query"]
+        for line in Path(queries).read_text().splitlines()
+        if line.strip()
+    ]
     dag = build_search_dag(emb, ann, rr, store, top_coarse=50, nprobe=8)
     totals = []
     for q in q_list[: min(200, len(q_list))]:
@@ -165,7 +179,7 @@ def gate_real(index_dir, queries, gt, pred, pred16, e3_result_path, budget_ms,
         totals.append(r["profile"]["total_ms"])
     p50 = _pct(totals, 0.5)
     p99 = _pct(totals, 0.99)
-    g3_pass = (p50 is not None and p50 <= budget_ms)
+    g3_pass = p50 is not None and p50 <= budget_ms
 
     # --- G1 ANN fidelity ---
     g1 = {}
@@ -178,7 +192,7 @@ def gate_real(index_dir, queries, gt, pred, pred16, e3_result_path, budget_ms,
         g1["reranked"] = round(recall, 4) if recall is not None else None
         g1["baseline"] = 0.2885
         g1["limit"] = 0.2885 - G1_DROP_BUDGET
-        g1["pass"] = (recall is not None and recall >= 0.2885 - G1_DROP_BUDGET)
+        g1["pass"] = recall is not None and recall >= 0.2885 - G1_DROP_BUDGET
     if pred16:
         from scripts.measure_recall import recall_at_10
 
@@ -198,10 +212,13 @@ def gate_real(index_dir, queries, gt, pred, pred16, e3_result_path, budget_ms,
         g2["reranked"] = reranked
         g2["baseline"] = G2_BASELINE
         g2["limit"] = G2_BASELINE - G2_DROP_BUDGET
-        g2["pass"] = (reranked is not None and reranked >= G2_BASELINE - G2_DROP_BUDGET)
+        g2["pass"] = reranked is not None and reranked >= G2_BASELINE - G2_DROP_BUDGET
     elif run_g2_e3:
-        print("[gate] G2 (E3) requires eval/e3_result.json; run scripts/run_e3.py "
-              "on the box and pass --e3-result <path>", file=sys.stderr)
+        print(
+            "[gate] G2 (E3) requires eval/e3_result.json; run scripts/run_e3.py "
+            "on the box and pass --e3-result <path>",
+            file=sys.stderr,
+        )
         g2["pass"] = None
     else:
         g2["pass"] = None
@@ -247,11 +264,13 @@ def main(argv=None):
     ap.add_argument("--pred", default="", help="pred for G1 (exact-id recall)")
     ap.add_argument("--pred16", default="", help="pred at nprobe=16 for G1")
     ap.add_argument("--e3-result", default="eval/e3_result.json", help="G2 result")
-    ap.add_argument("--run-g2-e3", action="store_true",
-                    help="attempt G2 live (requires index/store)")
+    ap.add_argument(
+        "--run-g2-e3",
+        action="store_true",
+        help="attempt G2 live (requires index/store)",
+    )
     ap.add_argument("--budget-ms", type=float, default=G3_BUDGET_MS)
-    ap.add_argument("--ledger", default="runs.jsonl",
-                    help="append one full-config row")
+    ap.add_argument("--ledger", default="runs.jsonl", help="append one full-config row")
     ap.add_argument("--json", action="store_true", help="emit JSON only")
     a = ap.parse_args(argv)
 
@@ -259,8 +278,17 @@ def main(argv=None):
         res = gate_synthetic(a.n_docs, min(20, a.n_docs), a.budget_ms)
     else:
         try:
-            res = gate_real(a.index, a.queries, a.gt, a.pred, a.pred16,
-                            a.e3_result, a.budget_ms, a.run_g2_e3, True)
+            res = gate_real(
+                a.index,
+                a.queries,
+                a.gt,
+                a.pred,
+                a.pred16,
+                a.e3_result,
+                a.budget_ms,
+                a.run_g2_e3,
+                True,
+            )
         except Exception as e:  # noqa: BLE001
             print(f"gate: runtime error: {e}", file=sys.stderr)
             return 2
@@ -270,15 +298,21 @@ def main(argv=None):
     else:
         g = res
         if a.synth:
-            print(f"G1 ann fidelity:  {g['G1_ann_fidelity']['value']:.4f}  "
-                  f"(limit {g['G1_ann_fidelity']['limit']:.4f}) -> "
-                  f"{'PASS' if g['G1_ann_fidelity']['pass'] else 'FAIL'}")
-            print(f"G2 answer cov.:   {g['G2_answer_coverage']['value']:.4f}  "
-                  f"(limit {g['G2_answer_coverage']['limit']:.4f}) -> "
-                  f"{'PASS' if g['G2_answer_coverage']['pass'] else 'FAIL'}")
-            print(f"G3 latency:       p50={g['G3_latency']['p50_ms']:.3f}  "
-                  f"p99={g['G3_latency']['p99_ms']:.3f}  (budget {g['G3_latency']['budget_ms']}) -> "
-                  f"{'PASS' if g['G3_latency']['pass'] else 'FAIL'}")
+            print(
+                f"G1 ann fidelity:  {g['G1_ann_fidelity']['value']:.4f}  "
+                f"(limit {g['G1_ann_fidelity']['limit']:.4f}) -> "
+                f"{'PASS' if g['G1_ann_fidelity']['pass'] else 'FAIL'}"
+            )
+            print(
+                f"G2 answer cov.:   {g['G2_answer_coverage']['value']:.4f}  "
+                f"(limit {g['G2_answer_coverage']['limit']:.4f}) -> "
+                f"{'PASS' if g['G2_answer_coverage']['pass'] else 'FAIL'}"
+            )
+            print(
+                f"G3 latency:       p50={g['G3_latency']['p50_ms']:.3f}  "
+                f"p99={g['G3_latency']['p99_ms']:.3f}  (budget {g['G3_latency']['budget_ms']}) -> "
+                f"{'PASS' if g['G3_latency']['pass'] else 'FAIL'}"
+            )
             print("G4 relevance:     advisory (n=10, do-not-regress)")
         else:
             print("=== gate result ===")
@@ -287,11 +321,13 @@ def main(argv=None):
             print(f"hard_gates_pass: {g.get('hard_gates_pass')}")
 
     if a.synth:
-        passed = all([
-            res["G1_ann_fidelity"]["pass"],
-            res["G2_answer_coverage"]["pass"],
-            res["G3_latency"]["pass"],
-        ])
+        passed = all(
+            [
+                res["G1_ann_fidelity"]["pass"],
+                res["G2_answer_coverage"]["pass"],
+                res["G3_latency"]["pass"],
+            ]
+        )
     else:
         passed = res.get("hard_gates_pass", True)
     # no input data at all -> usage-ish

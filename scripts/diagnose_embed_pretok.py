@@ -7,6 +7,7 @@ Reports (one line):
   N docs, batch, max_seq_len, device, prec, tokenize_only_s,
   tokenize_ms_per_doc, encode_total_s, docs_per_s, tokenize_share_pct
 """
+
 from __future__ import annotations
 
 import argparse
@@ -62,15 +63,20 @@ def load_corpus(corpus: str | None, n: int) -> list[str]:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--n", type=int, default=1000)
-    ap.add_argument("--corpus", default=None,
-                    help="WET file (.gz ok) or docs jsonl; default = synth")
+    ap.add_argument(
+        "--corpus",
+        default=None,
+        help="WET file (.gz ok) or docs jsonl; default = synth",
+    )
     ap.add_argument("--batch-size", type=int, default=EMBED_BATCH)
     ap.add_argument("--max-seq-length", type=int, default=512)
     ap.add_argument("--warmup", type=int, default=5)
     args = ap.parse_args()
 
     emb = Embedder(
-        model=EMBEDDER_MODEL, dim=256, max_seq_length=args.max_seq_length,
+        model=EMBEDDER_MODEL,
+        dim=256,
+        max_seq_length=args.max_seq_length,
         batch_size=args.batch_size,
     )
     texts = load_corpus(args.corpus, args.n)
@@ -80,12 +86,14 @@ def main() -> None:
     bs = args.batch_size
 
     if args.warmup:
-        emb.encode_docs(texts[: min(args.warmup, args.n)], batch_size=bs,
-                        sort_by_length=False)
+        emb.encode_docs(
+            texts[: min(args.warmup, args.n)], batch_size=bs, sort_by_length=False
+        )
 
     t0 = time.perf_counter()
-    emb.model.tokenizer(texts, padding=True, truncation=True,
-                        max_length=args.max_seq_length)
+    emb.model.tokenizer(
+        texts, padding=True, truncation=True, max_length=args.max_seq_length
+    )
     tokenize_s = time.perf_counter() - t0
 
     t0 = time.perf_counter()
@@ -110,7 +118,7 @@ def main() -> None:
     print(
         f"\nn={args.n} bs={bs} msl={args.max_seq_length} {emb.device} "
         f"tok={tokenize_s:.3f}s encode={encode_s:.3f}s "
-        f"share={share*100:.1f}% docs/s={args.n/encode_s:.1f}"
+        f"share={share * 100:.1f}% docs/s={args.n / encode_s:.1f}"
     )
 
 

@@ -6,6 +6,7 @@ k-way merge on URL. Duplicate row indices (excluding the first occurrence in
 sort order, which matches the original in-memory ``seen`` logic) come back as a
 ``bytearray`` indexed by source-row number.
 """
+
 from __future__ import annotations
 
 import heapq

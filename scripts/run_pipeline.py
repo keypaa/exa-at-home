@@ -58,11 +58,11 @@ def _skip(path: str, force: bool) -> bool:
     return os.path.exists(path) and not force
 
 
-
 def _load_cfg(path):
     if not path:
         return {}
     from exa_home.config_loader import load
+
     try:
         return load(path) or {}
     except (OSError, RuntimeError, ValueError) as e:
@@ -126,8 +126,11 @@ def stage_download(
 
 
 def stage_ingest(
-    wet_dir: str, docs_path: str, force: bool = False, verbose: bool = False,
-    progress_every: int = 100_000
+    wet_dir: str,
+    docs_path: str,
+    force: bool = False,
+    verbose: bool = False,
+    progress_every: int = 100_000,
 ) -> dict:
     """WET dir -> deduped docs.jsonl (digest-first + URL-second)."""
     from exa_home.ingest import read_wet, write_docs_jsonl
@@ -146,7 +149,10 @@ def stage_ingest(
             print(f"[ingest] {len(files)} WET files", flush=True)
         for i, p in enumerate(files, 1):
             if verbose:
-                print(f"[ingest] WET file {i}/{len(files)}: {os.path.basename(p)}", flush=True)
+                print(
+                    f"[ingest] WET file {i}/{len(files)}: {os.path.basename(p)}",
+                    flush=True,
+                )
             yield from read_wet(p)
 
     tmp = docs_path + ".tmp"
@@ -164,21 +170,24 @@ def stage_ingest(
     from scripts.ingest_dedup import mark_duplicate_rows
 
     dup_rows = mark_duplicate_rows(tmp)
-    with open(docs_path, "w", encoding="utf-8") as fout, open(tmp, encoding="utf-8") as fin:
+    with (
+        open(docs_path, "w", encoding="utf-8") as fout,
+        open(tmp, encoding="utf-8") as fin,
+    ):
         for idx, line in enumerate(fin):
-                d = json.loads(line)
-                url = d.get("url", "")
-                subset = d.get("subset", "")
-                if rx.search(url) or (subset and rx.search(subset)):
-                    excluded += 1
-                    continue
-                if dup_rows[idx]:
-                    dup_urls += 1
-                    continue
-                fout.write(json.dumps(d) + "\n")
-                kept += 1
-                if verbose and kept % 100_000 == 0:
-                    print(f"[ingest] url-dedup: {kept}", flush=True)
+            d = json.loads(line)
+            url = d.get("url", "")
+            subset = d.get("subset", "")
+            if rx.search(url) or (subset and rx.search(subset)):
+                excluded += 1
+                continue
+            if dup_rows[idx]:
+                dup_urls += 1
+                continue
+            fout.write(json.dumps(d) + "\n")
+            kept += 1
+            if verbose and kept % 100_000 == 0:
+                print(f"[ingest] url-dedup: {kept}", flush=True)
     os.remove(tmp)
     _log(
         "ingest",
@@ -256,6 +265,7 @@ def stage_index(
     from scripts.train_centroids import main as train_main
 
     t0 = time.perf_counter()
+    os.makedirs(out, exist_ok=True)
     cent_path = os.path.join(out, "centroids.npy")
     # One hash pass over the vectors per call (5 GB at full scale): that is
     # the price of a reuse decision that can actually detect a mismatch.
@@ -324,11 +334,13 @@ def stage_queries(
     """
     t0 = time.perf_counter()
     from scripts.jsonl import read_jsonl
+
     if _skip(queries_path, force) and _skip(gt_path, force):
         if verbose:
             print(f"[queries] reusing {queries_path} + {gt_path}", flush=True)
         return {"reused": True}
     from scripts.ground_truth import ground_truth
+
     # Only the first `nq` docs are needed: read them and stop. The old code
     # materialised the WHOLE corpus as a list of dicts to use docs[:nq].
     docs = list(itertools.islice(read_jsonl(docs_path), nq))
@@ -444,7 +456,11 @@ def cmd_all(a) -> int:
     if cfg is None:
         return 2
 
-    wet_files = a.wet_files if a.wet_files is not None else cfg.get("ingest", {}).get("wet_files", 4)
+    wet_files = (
+        a.wet_files
+        if a.wet_files is not None
+        else cfg.get("ingest", {}).get("wet_files", 4)
+    )
     k = a.k if a.k is not None else 1024
     srv = cfg.get("serving", {})
     verbose = a.verbose or bool(cfg.get("verbose", False))
@@ -465,17 +481,47 @@ def cmd_all(a) -> int:
 
     stage_fetch("CC-MAIN-2026-34", int(wet_files), urls, force=force, verbose=verbose)
     stage_download(urls, wet_dir, workers=workers, force=force, verbose=verbose)
-    stage_ingest(wet_dir, docs, force=force, verbose=verbose,
-                progress_every=max(1, a.progress_every))
-    stage_embed(docs, vecs, ids, batch, chunk, force=force, verbose=verbose,
-                show_progress=verbose, resume=not force,
-                progress_every=max(1, a.progress_every))
-    stage_index(vecs, ids, docs, index_dir, k=int(k), use_filter=not a.no_filter,
-                force=force, verbose=verbose,
-                progress_every=max(1, a.progress_every))
-    stage_queries(docs, vecs, ids, a.nq, queries_path=q_path, gt_path=gt_path,
-                  force=force, verbose=verbose,
-                  progress_every=max(1, a.progress_every))
+    stage_ingest(
+        wet_dir,
+        docs,
+        force=force,
+        verbose=verbose,
+        progress_every=max(1, a.progress_every),
+    )
+    stage_embed(
+        docs,
+        vecs,
+        ids,
+        batch,
+        chunk,
+        force=force,
+        verbose=verbose,
+        show_progress=verbose,
+        resume=not force,
+        progress_every=max(1, a.progress_every),
+    )
+    stage_index(
+        vecs,
+        ids,
+        docs,
+        index_dir,
+        k=int(k),
+        use_filter=not a.no_filter,
+        force=force,
+        verbose=verbose,
+        progress_every=max(1, a.progress_every),
+    )
+    stage_queries(
+        docs,
+        vecs,
+        ids,
+        a.nq,
+        queries_path=q_path,
+        gt_path=gt_path,
+        force=force,
+        verbose=verbose,
+        progress_every=max(1, a.progress_every),
+    )
     print(
         f"all pipeline complete ({wet_files} WET, K={k}): "
         f"{index_dir} + {q_path} + {gt_path} ready",
@@ -490,8 +536,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--force", action="store_true", help="redo stages even if outputs exist"
     )
     ap.add_argument("--verbose", action="store_true", help="per-stage progress output")
-    ap.add_argument("--progress-every", dest="progress_every", type=int, default=25000,
-                    help="print a progress tick every N emitted rows (0 disables)")
+    ap.add_argument(
+        "--progress-every",
+        dest="progress_every",
+        type=int,
+        default=25000,
+        help="print a progress tick every N emitted rows (0 disables)",
+    )
     ap.add_argument(
         "--config",
         default=None,
@@ -517,7 +568,11 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("ingest", help="WET dir -> docs.jsonl")
     p.add_argument("--wet", required=True)
     p.add_argument("--out", required=True)
-    p.set_defaults(fn=lambda a: stage_ingest(a.wet, a.out, a.force, a.verbose, progress_every=max(1, a.progress_every)))
+    p.set_defaults(
+        fn=lambda a: stage_ingest(
+            a.wet, a.out, a.force, a.verbose, progress_every=max(1, a.progress_every)
+        )
+    )
 
     p = sub.add_parser("embed", help="docs.jsonl -> vecs.npy + ids.json")
     p.add_argument("--docs", required=True)
@@ -527,7 +582,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-resume", dest="resume", action="store_false")
     p.set_defaults(
         fn=lambda a: stage_embed(
-            a.docs, a.out, a.ids, a.batch, a.chunk, a.force, a.verbose, a.verbose,
+            a.docs,
+            a.out,
+            a.ids,
+            a.batch,
+            a.chunk,
+            a.force,
+            a.verbose,
+            a.verbose,
             resume=a.resume,
         )
     )
@@ -559,8 +621,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--nq", type=int, default=200)
     p.set_defaults(
         fn=lambda a: stage_queries(
-            a.docs, a.vecs, a.ids, a.nq, force=a.force, verbose=a.verbose,
-            progress_every=max(1, a.progress_every)
+            a.docs,
+            a.vecs,
+            a.ids,
+            a.nq,
+            force=a.force,
+            verbose=a.verbose,
+            progress_every=max(1, a.progress_every),
         )
     )
 
@@ -572,10 +639,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--k", type=int, required=True)
     p.set_defaults(fn=cmd_full)
 
-    p = sub.add_parser("all", help="one config-fed run (fetch -> ingest -> embed -> index -> queries)")
+    p = sub.add_parser(
+        "all", help="one config-fed run (fetch -> ingest -> embed -> index -> queries)"
+    )
     p.add_argument("--config", default=None, help="YAML/JSON overrides")
-    p.add_argument("--wet-files", type=int, default=None, help="how many WET files to draw")
-    p.add_argument("--k", type=int, default=None, help="centroids (default 1024 or config)")
+    p.add_argument(
+        "--wet-files", type=int, default=None, help="how many WET files to draw"
+    )
+    p.add_argument(
+        "--k", type=int, default=None, help="centroids (default 1024 or config)"
+    )
     p.add_argument("--nq", type=int, default=200, help="gate queries")
     p.add_argument("--no-filter", action="store_true")
     p.set_defaults(fn=cmd_all)

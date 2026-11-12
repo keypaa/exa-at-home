@@ -53,7 +53,6 @@ def _title_from_url(url: str) -> str:
     return " ".join(part[:1].upper() + part[1:] for part in parts)
 
 
-
 def read_wet(path: str) -> Iterator[RawDoc]:
     """Yield RawDoc records from a WET file.
 
@@ -103,8 +102,9 @@ def read_wet(path: str) -> Iterator[RawDoc]:
             )
 
 
-def write_docs_jsonl(docs: Iterator[RawDoc], out_path: str,
-                     progress_every: int = 50_000) -> IngestStats:
+def write_docs_jsonl(
+    docs: Iterator[RawDoc], out_path: str, progress_every: int = 50_000
+) -> IngestStats:
     from collections import Counter
 
     stats, reasons, seen = IngestStats(), Counter(), set()

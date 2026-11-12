@@ -37,7 +37,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from exa_home.config import CRAWL, MAX_TERMS  # noqa: E402
+from exa_home.config import CRAWL, MAX_TERMS
 
 # Transient score-matrix budget: the centroid-assignment chunk (rows × K
 # float32 scores) stays inside this many bytes.

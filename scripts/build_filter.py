@@ -103,8 +103,13 @@ def _doc_source(docs):
         yield lambda: read_jsonl(path)
 
 
-def build(docs: Iterable[dict], out_dir: str, max_terms: int = 50_000,
-          verbose: bool = False, progress_every: int = 100_000) -> dict:
+def build(
+    docs: Iterable[dict],
+    out_dir: str,
+    max_terms: int = 50_000,
+    verbose: bool = False,
+    progress_every: int = 100_000,
+) -> dict:
     """docs (ANY iterable of dicts) -> the filter/ files. Returns the counts.
 
     TWO streaming passes:
@@ -179,12 +184,23 @@ def build(docs: Iterable[dict], out_dir: str, max_terms: int = 50_000,
     return counts
 
 
-def main(docs_path: str, out: str, max_terms: int):
+def main(
+    docs_path: str,
+    out: str,
+    max_terms: int,
+    verbose: bool = False,
+    progress_every: int = 50_000,
+):
     """docs.jsonl -> filter/. The corpus is streamed (never a list)."""
     from scripts.jsonl import JsonlFile
 
-    build(JsonlFile(docs_path), out, max_terms, verbose=a.verbose,
-         progress_every=max(1, a.progress_every))
+    build(
+        JsonlFile(docs_path),
+        out,
+        max_terms,
+        verbose=verbose,
+        progress_every=max(1, progress_every),
+    )
 
 
 if __name__ == "__main__":
@@ -195,4 +211,4 @@ if __name__ == "__main__":
     ap.add_argument("--verbose", action="store_true")
     ap.add_argument("--progress-every", dest="progress_every", type=int, default=100000)
     a = ap.parse_args()
-    main(a.docs, a.out, a.max_terms)
+    main(a.docs, a.out, a.max_terms, verbose=a.verbose, progress_every=a.progress_every)

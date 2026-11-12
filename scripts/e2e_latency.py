@@ -22,7 +22,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from exa_home.config import OPERATING_POINT  # noqa: E402
+from exa_home.config import OPERATING_POINT
 
 # Spec §7 profile keys from run_search (filter_ms is the measured
 # translate time; the in-scan intersect stays inside ann_ms, so filter
@@ -285,13 +285,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--max-pair-tokens",
         type=int,
-        default=160,
+        default=OPERATING_POINT["max_pair_tokens"],
         help="reranker pair truncation (real reranker only)",
     )
     ap.add_argument(
         "--batch-size",
         type=int,
-        default=128,
+        default=OPERATING_POINT["batch_size"],
         help="reranker batch size (real reranker only)",
     )
     ap.add_argument(
