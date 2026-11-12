@@ -13,7 +13,7 @@ pytest.importorskip(
 
 from fixtures.synth import make_docs, make_wet_gz
 
-from exa_home.ingest import read_wet, write_docs_jsonl
+from exa_home.ingest import RawDoc, read_wet, write_docs_jsonl
 
 
 def test_read_wet_yields_raw_docs(tmp_path):
@@ -95,6 +95,58 @@ def test_ingest_skips_empty_and_counts(tmp_path):
     out = str(tmp_path / "docs.jsonl")
     stats = write_docs_jsonl(read_wet(p), out)
     assert (stats.kept, stats.skipped) == (3, 1)
+
+
+def test_ingest_dedup_is_disk_backed_and_correct(tmp_path, monkeypatch):
+    """60k records / 20k unique digests: dedup must stay exact without
+    keeping every digest in a Python set (finding P2-05)."""
+    import exa_home.ingest as ingest_mod
+
+    opened: list[str] = []
+    real_connect = ingest_mod.sqlite3.connect
+
+    def record_connect(path, *a, **k):
+        opened.append(str(path))
+        return real_connect(path, *a, **k)
+
+    monkeypatch.setattr(ingest_mod.sqlite3, "connect", record_connect)
+
+    def docs():
+        for rep in range(3):
+            for i in range(20_000):
+                digest = f"{i:040x}"
+                yield RawDoc(
+                    id=f"sha1:{digest}",
+                    url=f"https://e.co/{i}",
+                    title="t",
+                    text=(
+                        f"document {i} repetition {rep}, padded with enough "
+                        "text to pass the fifty-character keep gate."
+                    ),
+                    date="",
+                    digest=digest,
+                )
+
+    out = str(tmp_path / "docs.jsonl")
+    stats = write_docs_jsonl(docs(), out, progress_every=0)
+    assert stats.kept == 20_000
+    assert stats.skipped == 40_000
+    assert stats.reasons["duplicate"] == 40_000
+    with open(out, encoding="utf-8") as f:
+        assert len(f.read().splitlines()) == 20_000
+    # The dedup structure really is a temp SQLite DB, not an in-RAM set.
+    assert len(opened) == 1 and opened[0].endswith("seen.sqlite")
+    assert not __import__("os").path.exists(opened[0]), "temp DB was not cleaned up"
+
+
+def test_ingest_duplicate_short_doc_counts_as_duplicate(tmp_path):
+    """Ordering preserved: the digest is recorded before the length gate,
+    so a repeat of a too-short doc is reported as duplicate, as before."""
+    doc = RawDoc(id="sha1:x", url="u", title="", text="short", date="", digest="x")
+    out = str(tmp_path / "docs.jsonl")
+    stats = write_docs_jsonl(iter([doc, doc]), out, progress_every=0)
+    assert stats.kept == 0
+    assert stats.reasons == {"too_short": 1, "duplicate": 1}
 
 
 def test_stage_ingest_excludes_by_url_not_by_page_text(tmp_path):

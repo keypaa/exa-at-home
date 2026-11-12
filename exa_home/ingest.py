@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import sqlite3
+import tempfile
 from collections.abc import Iterator
 from dataclasses import dataclass
 from urllib.parse import unquote, urlsplit
@@ -107,45 +110,64 @@ def write_docs_jsonl(
 ) -> IngestStats:
     from collections import Counter
 
-    stats, reasons, seen = IngestStats(), Counter(), set()
+    stats, reasons = IngestStats(), Counter()
     n_processed = 0
-    with open(out_path, "w", encoding="utf-8") as f:
-        for d in docs:
-            n_processed += 1
-            if progress_every and n_processed % progress_every == 0:
-                print(
-                    f"[ingest] records={n_processed} kept={stats.kept} "
-                    f"skipped={stats.skipped}",
-                    flush=True,
-                )
-            if d.error:
-                # The reader could not turn this record into a document:
-                # count it, or the loss never shows up in the stats.
-                stats.skipped += 1
-                reasons[d.error] += 1
-                continue
-            if d.digest in seen:
-                stats.skipped += 1
-                reasons["duplicate"] += 1
-                continue
-            seen.add(d.digest)
-            if len(d.text) < 50:
-                stats.skipped += 1
-                reasons["too_short"] += 1
-                continue
-            f.write(
-                json.dumps(
-                    {
-                        "id": d.id,
-                        "url": d.url,
-                        "title": d.title,
-                        "text": d.text,
-                        "date": d.date,
-                    }
-                )
-                + "\n"
-            )
-            stats.kept += 1
+    # Dedup used to be an in-memory `set` of every digest: at 1M+ WET
+    # records that set is hundreds of MB and grows with the corpus
+    # (finding P2-05). A temp SQLite table keeps RAM bounded; the DB lives
+    # in a TemporaryDirectory and is deleted when the ingest finishes.
+    with tempfile.TemporaryDirectory(prefix="exa-ingest-dedup-") as tmpdir:
+        conn = sqlite3.connect(os.path.join(tmpdir, "seen.sqlite"))
+        try:
+            # This DB only dedups within one run; crash-safety is irrelevant.
+            conn.execute("PRAGMA journal_mode=OFF")
+            conn.execute("PRAGMA synchronous=OFF")
+            conn.execute("CREATE TABLE seen (digest TEXT PRIMARY KEY) WITHOUT ROWID")
+            with open(out_path, "w", encoding="utf-8") as f:
+                for d in docs:
+                    n_processed += 1
+                    if progress_every and n_processed % progress_every == 0:
+                        print(
+                            f"[ingest] records={n_processed} kept={stats.kept} "
+                            f"skipped={stats.skipped}",
+                            flush=True,
+                        )
+                    if d.error:
+                        # The reader could not turn this record into a
+                        # document: count it, or the loss never shows up in
+                        # the stats.
+                        stats.skipped += 1
+                        reasons[d.error] += 1
+                        continue
+                    # INSERT OR IGNORE reports rowcount=0 for a duplicate;
+                    # the first occurrence wins, as the set did.
+                    cur = conn.execute(
+                        "INSERT OR IGNORE INTO seen(digest) VALUES (?)",
+                        (d.digest,),
+                    )
+                    if cur.rowcount == 0:
+                        stats.skipped += 1
+                        reasons["duplicate"] += 1
+                        continue
+                    if len(d.text) < 50:
+                        stats.skipped += 1
+                        reasons["too_short"] += 1
+                        continue
+                    f.write(
+                        json.dumps(
+                            {
+                                "id": d.id,
+                                "url": d.url,
+                                "title": d.title,
+                                "text": d.text,
+                                "date": d.date,
+                            }
+                        )
+                        + "\n"
+                    )
+                    stats.kept += 1
+        finally:
+            conn.close()
     stats.reasons = dict(reasons)
     if n_processed:
         print(
