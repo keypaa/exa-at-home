@@ -41,9 +41,9 @@ The five input classes/failure modes most likely to bite a user of this software
 - Produces: `PyResult<Self>`; returns `Err` when `nrows * ncols` exceeds a cap (e.g. 64M elements) instead of `Vec::with_capacity` panicking.
 
 **Steps:**
-- [ ] **Step 1:** Write failing test `ann_index_new_rejects_absurd_shape` constructing a tiny 1×1 float32 array and asserting `AnnIndex::new` with a strided 1×10^12 view returns an `Err` (not panic). Run: `PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 cargo test -p ann-core ann_index_new_rejects_absurd_shape` → FAIL.
-- [ ] **Step 2:** Implement: before `Vec::with_capacity(a.nrows() * a.ncols())`, check `a.nrows().checked_mul(a.ncols())` against a `MAX_MATRIX_ELEMENTS` cap; return `PyValueError` on overflow/too-large.
-- [ ] **Step 3:** Run test → PASS; run `cargo test -p ann-core` (28 pass); commit.
+- [x] **Step 1:** Write failing test `ann_index_new_rejects_absurd_shape` constructing a tiny 1×1 float32 array and asserting `AnnIndex::new` with a strided 1×10^12 view returns an `Err` (not panic). Run: `PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 cargo test -p ann-core ann_index_new_rejects_absurd_shape` → FAIL.
+- [x] **Step 2:** Implement: before `Vec::with_capacity(a.nrows() * a.ncols())`, check `a.nrows().checked_mul(a.ncols())` against a `MAX_MATRIX_ELEMENTS` cap; return `PyValueError` on overflow/too-large.
+- [x] **Step 3:** Run test → PASS; run `cargo test -p ann-core` (28 pass); commit.
 
 ## Task R2 — Rust core: same strided-matrix root cause as R1 (bounds safety)
 
@@ -56,9 +56,9 @@ The five input classes/failure modes most likely to bite a user of this software
 **Interfaces:** Same as R1.
 
 **Steps:**
-- [ ] **Step 1:** Write failing test asserting strided-over-read returns Err. Run → FAIL.
-- [ ] **Step 2:** Implement: validate that the strided element access stays within the underlying buffer (or rely on the element cap making OOB unreachable from realistic input).
-- [ ] **Step 3:** Run test → PASS; run full Rust suite; commit.
+- [x] **Step 1:** Write failing test asserting strided-over-read returns Err. Run → FAIL.
+- [x] **Step 2:** Implement: validate that the strided element access stays within the underlying buffer (or rely on the element cap making OOB unreachable from realistic input).
+- [x] **Step 3:** Run test → PASS; run full Rust suite; commit.
 
 ## Task R3 — Rust core: fix clippy erasing_op in index.rs test fixture (finding R3, Low)
 
@@ -69,9 +69,9 @@ The five input classes/failure modes most likely to bite a user of this software
 **Interfaces:** None.
 
 **Steps:**
-- [ ] **Step 1:** Run `PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 cargo clippy -p ann-core --all-targets` → confirm FAIL on `0 * CODE_BYTES`.
-- [ ] **Step 2:** Replace `0 * CODE_BYTES` → `0` and `1 * CODE_BYTES` → `CODE_BYTES`.
-- [ ] **Step 3:** Run clippy → clean; run `cargo fmt --check`; commit.
+- [x] **Step 1:** Run `PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 cargo clippy -p ann-core --all-targets` → confirm FAIL on `0 * CODE_BYTES`.
+- [x] **Step 2:** Replace `0 * CODE_BYTES` → `0` and `1 * CODE_BYTES` → `CODE_BYTES`.
+- [x] **Step 3:** Run clippy → clean; run `cargo fmt --check`; commit.
 
 ## Task R4 — Rust core: bounded top-n_coarse in search_lists (finding R4, Medium)
 
@@ -84,9 +84,9 @@ The five input classes/failure modes most likely to bite a user of this software
 - Produces: `Vec<(u32, f32)>` truncated to `n_coarse` (same), computed via a bounded selection instead of full `sort_by`+`truncate`.
 
 **Steps:**
-- [ ] **Step 1:** Write test: build index where one list holds a large share; call `search_lists` with `n_coarse=50`; assert `got.len() <= 50` and scores match the true top-50. Run → FAIL (or pass but measure).
-- [ ] **Step 2:** Implement: use `select_nth_unstable_by` to partition to top n_coarse, then sort only those, instead of sorting all scanned candidates.
-- [ ] **Step 3:** Run test → PASS; run `cargo test -p ann-core`; commit.
+- [x] **Step 1:** Write test: build index where one list holds a large share; call `search_lists` with `n_coarse=50`; assert `got.len() <= 50` and scores match the true top-50. Run → FAIL (or pass but measure).
+- [x] **Step 2:** Implement: use `select_nth_unstable_by` to partition to top n_coarse, then sort only those, instead of sorting all scanned candidates.
+- [x] **Step 3:** Run test → PASS; run `cargo test -p ann-core`; commit.
 
 ---
 
@@ -101,9 +101,9 @@ The five input classes/failure modes most likely to bite a user of this software
 - Produces: same signatures; internal locking changed so disk I/O is not under the global lock; rescan bounded per-shard-per-generation.
 
 **Steps:**
-- [ ] **Step 1:** Write `test_store_concurrent_gets_no_collapse` (N threads vs serial, assert speedup ≥ 0.8×) and `test_store_rescan_bounded` (append one doc, repeated gets → only one rescan). Run → FAIL.
-- [ ] **Step 2:** Implement: introduce a read-mostly index reference swapped under lock; perform `_scan_shard`/disk reads outside the global lock; track a per-shard "generation" so a changed shard is rescanned at most once per generation.
-- [ ] **Step 3:** Run tests → PASS; run `pytest tests/test_store.py -q`; run ruff on `exa_home/store.py`; commit.
+- [x] **Step 1:** Write `test_store_concurrent_gets_no_collapse` (N threads vs serial, assert speedup ≥ 0.8×) and `test_store_rescan_bounded` (append one doc, repeated gets → only one rescan). Run → FAIL.
+- [x] **Step 2:** Implement: introduce a read-mostly index reference swapped under lock; perform `_scan_shard`/disk reads outside the global lock; track a per-shard "generation" so a changed shard is rescanned at most once per generation.
+- [x] **Step 3:** Run tests → PASS; run `pytest tests/test_store.py -q`; run ruff on `exa_home/store.py`; commit.
 
 ## Task P2 — Python lib: content hash per record in ContentStore (finding P1-04, High)
 
@@ -116,9 +116,9 @@ The five input classes/failure modes most likely to bite a user of this software
 - Produces: `get()` verifies a stored content digest against the record bytes; returns `None` (miss → rescan) on mismatch instead of serving substituted content.
 
 **Steps:**
-- [ ] **Step 1:** Write test: `put` a doc, `save_index`, mutate the shard bytes at the same offset with same-length different content, assert `get(doc_id)` returns `None` (or rescans to original). Run → FAIL.
-- [ ] **Step 2:** Implement: store sha256 of payload in index; `_read_record` verifies digest; on mismatch treat as miss and rescan.
-- [ ] **Step 3:** Run test → PASS; run `pytest tests/test_store.py -q`; commit.
+- [x] **Step 1:** Write test: `put` a doc, `save_index`, mutate the shard bytes at the same offset with same-length different content, assert `get(doc_id)` returns `None` (or rescans to original). Run → FAIL.
+- [x] **Step 2:** Implement: store sha256 of payload in index; `_read_record` verifies digest; on mismatch treat as miss and rescan.
+- [x] **Step 3:** Run test → PASS; run `pytest tests/test_store.py -q`; commit.
 
 ## Task P3 — Python lib: disk-backed ingest dedup (finding P2-05, High)
 
@@ -131,9 +131,9 @@ The five input classes/failure modes most likely to bite a user of this software
 - Produces: same `IngestStats`; dedup uses a disk-backed structure (temp-file + sort/uniq or sqlite) so RAM is bounded independent of corpus size.
 
 **Steps:**
-- [ ] **Step 1:** Write test ingesting >50k docs with many duplicates through `write_docs_jsonl`; assert kept count correct and no `MemoryError`; (optionally assert peak RAM bounded). Run → currently passes but memory unbounded; add assertion on dedup correctness with duplicates.
-- [ ] **Step 2:** Implement: replace in-memory `seen` set with a disk-backed dedup (e.g. write candidate digests to a temp file, sort + uniq, or use a bloom-filter+spill). Keep `seen` for small runs as a fast path? Keep simple: single disk-backed pass.
-- [ ] **Step 3:** Run test → PASS; run `pytest tests/test_ingest.py -q`; commit.
+- [x] **Step 1:** Write test ingesting >50k docs with many duplicates through `write_docs_jsonl`; assert kept count correct and no `MemoryError`; (optionally assert peak RAM bounded). Run → currently passes but memory unbounded; add assertion on dedup correctness with duplicates.
+- [x] **Step 2:** Implement: replace in-memory `seen` set with a disk-backed dedup (e.g. write candidate digests to a temp file, sort + uniq, or use a bloom-filter+spill). Keep `seen` for small runs as a fast path? Keep simple: single disk-backed pass.
+- [x] **Step 3:** Run test → PASS; run `pytest tests/test_ingest.py -q`; commit.
 
 ## Task P4 — Python lib: strict config_loader + server consumes loaded config (finding P2-06, High; D3)
 
@@ -146,9 +146,9 @@ The five input classes/failure modes most likely to bite a user of this software
 - Produces: mcp_server/orch read operating point from the loaded config; unknown keys raise `ValueError`.
 
 **Steps:**
-- [ ] **Step 1:** Write `test_config_loader_rejects_unknown_key` and `test_mcp_uses_loaded_config_not_constant`. Run → FAIL.
-- [ ] **Step 2:** Implement: `HardwareProfile(**raw["hardware"])` raises on unexpected kwargs (no silent fallback); `mcp_server.main()` / `orch` accept an optional operating-point dict resolved from the loaded config, falling back to `OPERATING_POINT` only when none loaded.
-- [ ] **Step 3:** Run tests → PASS; run ruff on touched files; commit.
+- [x] **Step 1:** Write `test_config_loader_rejects_unknown_key` and `test_mcp_uses_loaded_config_not_constant`. Run → FAIL.
+- [x] **Step 2:** Implement: `HardwareProfile(**raw["hardware"])` raises on unexpected kwargs (no silent fallback); `mcp_server.main()` / `orch` accept an optional operating-point dict resolved from the loaded config, falling back to `OPERATING_POINT` only when none loaded.
+- [x] **Step 3:** Run tests → PASS; run ruff on touched files; commit.
 
 ## Task P5 — Python lib: keep shard handle open during bulk (finding P2-07, Medium)
 
@@ -161,9 +161,9 @@ The five input classes/failure modes most likely to bite a user of this software
 - Produces: same; internal file-handle caching during `begin_bulk`.
 
 **Steps:**
-- [ ] **Step 1:** Write test asserting bulk `put` + `save_index` roundtrips correctly (existing `test_bulk_offsets_roundtrip_no_rescan` covers; add syscall-count check optional).
-- [ ] **Step 2:** Implement: `begin_bulk` opens and caches shard file handles; `put` writes to cached handle and tracks offset; `save_index` flushes+closes.
-- [ ] **Step 3:** Run test → PASS; commit.
+- [x] **Step 1:** Write test asserting bulk `put` + `save_index` roundtrips correctly (existing `test_bulk_offsets_roundtrip_no_rescan` covers; add syscall-count check optional).
+- [x] **Step 2:** Implement: `begin_bulk` opens and caches shard file handles; `put` writes to cached handle and tracks offset; `save_index` flushes+closes.
+- [x] **Step 3:** Run test → PASS; commit.
 
 ## Task P6 — Python lib: batch store.get_many (finding P2-08, Medium)
 
@@ -177,9 +177,9 @@ The five input classes/failure modes most likely to bite a user of this software
 - Produces: dict id→doc (or None), single index load, batched reads.
 
 **Steps:**
-- [ ] **Step 1:** Write `test_store_get_many` asserting batch results equal individual gets. Run → FAIL (method missing).
-- [ ] **Step 2:** Implement `get_many`; refactor `home_search` to call it once instead of per-result `get()`.
-- [ ] **Step 3:** Run tests → PASS; commit.
+- [x] **Step 1:** Write `test_store_get_many` asserting batch results equal individual gets. Run → FAIL (method missing).
+- [x] **Step 2:** Implement `get_many`; refactor `home_search` to call it once instead of per-result `get()`.
+- [x] **Step 3:** Run tests → PASS; commit.
 
 ## Task P7 — Python lib: top_k vs top_coarse cap (finding P2-09, Medium)
 
@@ -191,9 +191,9 @@ The five input classes/failure modes most likely to bite a user of this software
 - Consumes: `home_search(query, top_k=10)`; produces results capped consistently.
 
 **Steps:**
-- [ ] **Step 1:** Write test: `home_search(..., top_k=100)` returns at most `top_coarse` (50) results and does not error. Run → currently returns 50 but undocumented; add explicit assertion + clamp behavior.
-- [ ] **Step 2:** Implement: clamp `top_k = min(top_k, top_coarse)` in `home_search` and document in docstring; or derive `n_coarse = max(top_coarse, top_k)`.
-- [ ] **Step 3:** Run test → PASS; commit.
+- [x] **Step 1:** Write test: `home_search(..., top_k=100)` returns at most `top_coarse` (50) results and does not error. Run → currently returns 50 but undocumented; add explicit assertion + clamp behavior.
+- [x] **Step 2:** Implement: clamp `top_k = min(top_k, top_coarse)` in `home_search` and document in docstring; or derive `n_coarse = max(top_coarse, top_k)`.
+- [x] **Step 3:** Run test → PASS; commit.
 
 ## Task P8 — Python lib: mask errors over MCP boundary + pagination constant (findings P2-10, P3-16, Medium/Low)
 
@@ -206,9 +206,9 @@ The five input classes/failure modes most likely to bite a user of this software
 - Produces: errors return `{"error": {...}}` shape; no raw `str(e)`/`AttributeError` leaks.
 
 **Steps:**
-- [ ] **Step 1:** Write `test_home_search_empty_query_returns_error_dict` (not an exception) and `test_home_contents_page_size_is_named_constant`. Run → FAIL.
-- [ ] **Step 2:** Implement: `PAGE_SIZE = 20` module constant; wrap `home_search`/`home_contents` bodies so validation + backend exceptions become the redacted error dict.
-- [ ] **Step 3:** Run tests → PASS; run ruff on `mcp_server.py`; commit.
+- [x] **Step 1:** Write `test_home_search_empty_query_returns_error_dict` (not an exception) and `test_home_contents_page_size_is_named_constant`. Run → FAIL.
+- [x] **Step 2:** Implement: `PAGE_SIZE = 20` module constant; wrap `home_search`/`home_contents` bodies so validation + backend exceptions become the redacted error dict.
+- [x] **Step 3:** Run tests → PASS; run ruff on `mcp_server.py`; commit.
 
 ## Task P9 — Python lib: store._shard uses config.SHARD_COUNT (finding P2-11, Medium)
 
@@ -221,9 +221,9 @@ The five input classes/failure modes most likely to bite a user of this software
 - Produces: shard path derived from configured count.
 
 **Steps:**
-- [ ] **Step 1:** Write test asserting `ContentStore._shard(doc_id)` distributes across `config.SHARD_COUNT` shards. Run → FAIL.
-- [ ] **Step 2:** Implement import + use.
-- [ ] **Step 3:** Run test → PASS; commit.
+- [x] **Step 1:** Write test asserting `ContentStore._shard(doc_id)` distributes across `config.SHARD_COUNT` shards. Run → FAIL.
+- [x] **Step 2:** Implement import + use.
+- [x] **Step 3:** Run test → PASS; commit.
 
 ## Task P10 — Python lib: byte-budgeted LRU (finding P2-12, Medium)
 
@@ -236,9 +236,9 @@ The five input classes/failure modes most likely to bite a user of this software
 - Produces: LRU evicts by total byte size, not just count.
 
 **Steps:**
-- [ ] **Step 1:** Write test storing docs of varying sizes with a small byte budget; assert total cached bytes ≤ budget. Run → FAIL.
-- [ ] **Step 2:** Implement byte tracking + eviction loop.
-- [ ] **Step 3:** Run test → PASS; commit.
+- [x] **Step 1:** Write test storing docs of varying sizes with a small byte budget; assert total cached bytes ≤ budget. Run → FAIL.
+- [x] **Step 2:** Implement byte tracking + eviction loop.
+- [x] **Step 3:** Run test → PASS; commit.
 
 ## Task P11 — Python lib: manifest exclusion depth + encoding (finding P2-13, Medium)
 
@@ -251,9 +251,9 @@ The five input classes/failure modes most likely to bite a user of this software
 - Produces: nested `store/` excluded; manifest written with UTF-8.
 
 **Steps:**
-- [ ] **Step 1:** Write test creating `index/nested/store/x.bin` and asserting it's not in the manifest. Run → FAIL.
-- [ ] **Step 2:** Implement recursive `store/` exclusion + `encoding="utf-8"`.
-- [ ] **Step 3:** Run test → PASS; run ruff on `index_format.py`; commit.
+- [x] **Step 1:** Write test creating `index/nested/store/x.bin` and asserting it's not in the manifest. Run → FAIL.
+- [x] **Step 2:** Implement recursive `store/` exclusion + `encoding="utf-8"`.
+- [x] **Step 3:** Run test → PASS; run ruff on `index_format.py`; commit.
 
 ## Task P12 — Python lib: title percent-encoding decoded (finding P3-15, Low)
 
@@ -266,9 +266,9 @@ The five input classes/failure modes most likely to bite a user of this software
 - Produces: decoded, sanitized title.
 
 **Steps:**
-- [ ] **Step 1:** Write test: `"a%20b.html"` → `"A B"`; `"foo%2Fbar.html"` → `"Foo Bar"`. Run → FAIL.
-- [ ] **Step 2:** Implement `urllib.parse.unquote` + control-char strip.
-- [ ] **Step 3:** Run test → PASS; commit.
+- [x] **Step 1:** Write test: `"a%20b.html"` → `"A B"`; `"foo%2Fbar.html"` → `"Foo Bar"`. Run → FAIL.
+- [x] **Step 2:** Implement `urllib.parse.unquote` + control-char strip.
+- [x] **Step 3:** Run test → PASS; commit.
 
 ---
 
@@ -283,9 +283,9 @@ The five input classes/failure modes most likely to bite a user of this software
 - Produces: HTTP server requires bearer token; rate-limited; bindable host.
 
 **Steps:**
-- [ ] **Step 1:** Write `test_mcp_server_rejects_without_token` (using synth backends, FastMCP test client or direct tool calls with auth middleware). Run → FAIL.
-- [ ] **Step 2:** Implement: add `--token`/`--bind` args; wire FastMCP auth provider + rate-limiting middleware (fastmcp 4.0.3 has `rate_limiting`); apply token check to tool invocation.
-- [ ] **Step 3:** Run tests → PASS; run `python -m exa_home.mcp_server --help` to confirm new flags; commit.
+- [x] **Step 1:** Write `test_mcp_server_rejects_without_token` (using synth backends, FastMCP test client or direct tool calls with auth middleware). Run → FAIL.
+- [x] **Step 2:** Implement: add `--token`/`--bind` args; wire FastMCP auth provider + rate-limiting middleware (fastmcp 4.0.3 has `rate_limiting`); apply token check to tool invocation.
+- [x] **Step 3:** Run tests → PASS; run `python -m exa_home.mcp_server --help` to confirm new flags; commit.
 
 ## Task S2 — Security: contain offsets.json shard paths (finding S2, High)
 
@@ -298,9 +298,9 @@ The five input classes/failure modes most likely to bite a user of this software
 - Produces: `ValueError` (or skip) for shard paths escaping `root`.
 
 **Steps:**
-- [ ] **Step 1:** Write test: `offsets.json` with `{"evil": ["../target.jsonl", 0]}` → `ContentStore.get("evil")` does not read outside root. Run → FAIL (currently reads external file).
-- [ ] **Step 2:** Implement: `os.path.normpath(os.path.join(root, shard))` must start with `root`; reject absolute and `..`.
-- [ ] **Step 3:** Run test → PASS; commit.
+- [x] **Step 1:** Write test: `offsets.json` with `{"evil": ["../target.jsonl", 0]}` → `ContentStore.get("evil")` does not read outside root. Run → FAIL (currently reads external file).
+- [x] **Step 2:** Implement: `os.path.normpath(os.path.join(root, shard))` must start with `root`; reject absolute and `..`.
+- [x] **Step 3:** Run test → PASS; commit.
 
 ## Task S3 — Security: sanitize / mark corpus-derived text (finding S3, High)
 
@@ -313,9 +313,9 @@ The five input classes/failure modes most likely to bite a user of this software
 - Produces: responses include `source: "corpus"` / `untrusted: true` marker and escaped text; snippets sanitized.
 
 **Steps:**
-- [ ] **Step 1:** Write test: `home_contents` result items include provenance marking; text with `IGNORE ALL PREVIOUS INSTRUCTIONS` is escaped/flagged. Run → FAIL.
-- [ ] **Step 2:** Implement: add `"provenance": "corpus"` and HTML-escape `text`/`snippet` before returning.
-- [ ] **Step 3:** Run test → PASS; commit.
+- [x] **Step 1:** Write test: `home_contents` result items include provenance marking; text with `IGNORE ALL PREVIOUS INSTRUCTIONS` is escaped/flagged. Run → FAIL.
+- [x] **Step 2:** Implement: add `"provenance": "corpus"` and HTML-escape `text`/`snippet` before returning.
+- [x] **Step 3:** Run test → PASS; commit.
 
 ## Task S4 — Security: mask_error_details + don't abandon timeout pools (findings S4, S5, Medium)
 
@@ -328,9 +328,9 @@ The five input classes/failure modes most likely to bite a user of this software
 - Produces: normalized external errors; timeout pools shut down cleanly.
 
 **Steps:**
-- [ ] **Step 1:** Write test: `home_search` with bad input returns externalized error without `type`/`node`/`span_ms` internals. Run → FAIL.
-- [ ] **Step 2:** Implement: `mask_error_details=True` where supported; wrap tool bodies; `DAG.run`/`Reranker` shut down (not abandon) timeout pools.
-- [ ] **Step 3:** Run tests → PASS; commit.
+- [x] **Step 1:** Write test: `home_search` with bad input returns externalized error without `type`/`node`/`span_ms` internals. Run → FAIL.
+- [x] **Step 2:** Implement: `mask_error_details=True` where supported; wrap tool bodies; `DAG.run`/`Reranker` shut down (not abandon) timeout pools.
+- [x] **Step 3:** Run tests → PASS; commit.
 
 ## Task S5 — Security: cap max_chars_per_doc / total bytes per call (finding S5, Medium)
 
@@ -343,9 +343,9 @@ The five input classes/failure modes most likely to bite a user of this software
 - Produces: capped total payload per call.
 
 **Steps:**
-- [ ] **Step 1:** Write test asserting 100 ids × max_chars does not exceed a sane total. Run → FAIL.
-- [ ] **Step 2:** Implement total-bytes cap.
-- [ ] **Step 3:** Run test → PASS; commit.
+- [x] **Step 1:** Write test asserting 100 ids × max_chars does not exceed a sane total. Run → FAIL.
+- [x] **Step 2:** Implement total-bytes cap.
+- [x] **Step 3:** Run test → PASS; commit.
 
 ## Task S6 — Security: filter type/size validation (finding S8, Low)
 
@@ -358,9 +358,9 @@ The five input classes/failure modes most likely to bite a user of this software
 - Produces: `ValueError` for non-list `terms`, oversized `domains`, etc.
 
 **Steps:**
-- [ ] **Step 1:** Write test: `translate_filters({"terms": "alpha"})` raises `ValueError`. Run → FAIL.
-- [ ] **Step 2:** Implement type/size validation.
-- [ ] **Step 3:** Run test → PASS; commit.
+- [x] **Step 1:** Write test: `translate_filters({"terms": "alpha"})` raises `ValueError`. Run → FAIL.
+- [x] **Step 2:** Implement type/size validation.
+- [x] **Step 3:** Run test → PASS; commit.
 
 ## Task S7 — Security: index manifest trust anchor (finding S6, Low)
 
@@ -371,8 +371,8 @@ The five input classes/failure modes most likely to bite a user of this software
 **Interfaces:** N/A.
 
 **Steps:**
-- [ ] **Step 1:** Add a `verify_manifest_signature` placeholder/hook + docstring noting manifest is integrity-only, not authenticity.
-- [ ] **Step 2:** Run `pytest tests/test_index_format.py -q`; commit.
+- [x] **Step 1:** Add a `verify_manifest_signature` placeholder/hook + docstring noting manifest is integrity-only, not authenticity.
+- [x] **Step 2:** Run `pytest tests/test_index_format.py -q`; commit.
 
 ---
 
@@ -387,9 +387,9 @@ The five input classes/failure modes most likely to bite a user of this software
 - Produces: re-downloads if on-disk files don't match requested URLs (URL set + size/checksum).
 
 **Steps:**
-- [ ] **Step 1:** Write test: pre-seed `out_dir` with wrong-count/wrong-name files for a different URL set; `stage_download(force=False)` must still download (not skip). Run → FAIL.
-- [ ] **Step 2:** Implement: compare on-disk file set against `urls_file` entries before skipping; include crawl in tag/out dir.
-- [ ] **Step 3:** Run test → PASS (synthetic, no network — use file URLs or monkeypatch download); commit.
+- [x] **Step 1:** Write test: pre-seed `out_dir` with wrong-count/wrong-name files for a different URL set; `stage_download(force=False)` must still download (not skip). Run → FAIL.
+- [x] **Step 2:** Implement: compare on-disk file set against `urls_file` entries before skipping; include crawl in tag/out dir.
+- [x] **Step 3:** Run test → PASS (synthetic, no network — use file URLs or monkeypatch download); commit.
 
 ## Task C2 — Pipeline: provenance-gate stage_queries (finding C2, Critical)
 
@@ -402,9 +402,9 @@ The five input classes/failure modes most likely to bite a user of this software
 - Produces: regenerates if provenance hash mismatch.
 
 **Steps:**
-- [ ] **Step 1:** Write test: rebuild docs, `stage_queries(force=False)` with stale gt → regenerates. Run → FAIL.
-- [ ] **Step 2:** Implement hash-based provenance check (hash docs.jsonl, compare to stored fingerprint).
-- [ ] **Step 3:** Run test → PASS; commit.
+- [x] **Step 1:** Write test: rebuild docs, `stage_queries(force=False)` with stale gt → regenerates. Run → FAIL.
+- [x] **Step 2:** Implement hash-based provenance check (hash docs.jsonl, compare to stored fingerprint).
+- [x] **Step 3:** Run test → PASS; commit.
 
 ## Task C3 — Pipeline: provenance-gate stage_ingest (finding C3, Critical)
 
@@ -417,9 +417,9 @@ The five input classes/failure modes most likely to bite a user of this software
 - Produces: regenerates if WET fingerprint changed.
 
 **Steps:**
-- [ ] **Step 1:** Write test: change WET dir contents, `stage_ingest(force=False)` → re-ingests. Run → FAIL.
-- [ ] **Step 2:** Implement WET fingerprint (sha256 of WET file list) stored alongside docs.jsonl; compare on reuse.
-- [ ] **Step 3:** Run test → PASS; commit.
+- [x] **Step 1:** Write test: change WET dir contents, `stage_ingest(force=False)` → re-ingests. Run → FAIL.
+- [x] **Step 2:** Implement WET fingerprint (sha256 of WET file list) stored alongside docs.jsonl; compare on reuse.
+- [x] **Step 3:** Run test → PASS; commit.
 
 ## Task C4 — Pipeline: e2e_latency defaults from OPERATING_POINT (finding C4, High)
 
@@ -432,9 +432,9 @@ The five input classes/failure modes most likely to bite a user of this software
 - Produces: defaults match `exa_home.config.OPERATING_POINT`.
 
 **Steps:**
-- [ ] **Step 1:** Write test asserting `e2e_latency.py` argparse defaults for `max_pair_tokens`/`batch_size` equal `config.OPERATING_POINT`. Run → FAIL.
-- [ ] **Step 2:** Import config and set defaults.
-- [ ] **Step 3:** Run test → PASS; run `scripts/e2e_latency.py --help` to confirm; commit.
+- [x] **Step 1:** Write test asserting `e2e_latency.py` argparse defaults for `max_pair_tokens`/`batch_size` equal `config.OPERATING_POINT`. Run → FAIL.
+- [x] **Step 2:** Import config and set defaults.
+- [x] **Step 3:** Run test → PASS; run `scripts/e2e_latency.py --help` to confirm; commit.
 
 ## Task C5 — Pipeline: build_filter.main signature (finding C5, High)
 
@@ -447,9 +447,9 @@ The five input classes/failure modes most likely to bite a user of this software
 - Produces: filter index; no reliance on module-global `a`.
 
 **Steps:**
-- [ ] **Step 1:** Write test calling `main(...)` directly → currently `NameError`. Run → FAIL.
-- [ ] **Step 2:** Add parameters to `main`; `if __name__ == "__main__"` passes parsed args.
-- [ ] **Step 3:** Run test → PASS; commit.
+- [x] **Step 1:** Write test calling `main(...)` directly → currently `NameError`. Run → FAIL.
+- [x] **Step 2:** Add parameters to `main`; `if __name__ == "__main__"` passes parsed args.
+- [x] **Step 3:** Run test → PASS; commit.
 
 ## Task C6 — Pipeline: duplicate query_id error (finding C6, Medium)
 
@@ -462,9 +462,9 @@ The five input classes/failure modes most likely to bite a user of this software
 - Produces: `ValueError` on duplicate `query_id`.
 
 **Steps:**
-- [ ] **Step 1:** Write test with duplicate `query_id` → assert `ValueError`. Run → FAIL.
-- [ ] **Step 2:** Implement duplicate detection before dict comprehension.
-- [ ] **Step 3:** Run test → PASS; commit.
+- [x] **Step 1:** Write test with duplicate `query_id` → assert `ValueError`. Run → FAIL.
+- [x] **Step 2:** Implement duplicate detection before dict comprehension.
+- [x] **Step 3:** Run test → PASS; commit.
 
 ## Task C7 — Pipeline: warn on --nq random ground-truth path (finding C7, Medium)
 
@@ -477,9 +477,9 @@ The five input classes/failure modes most likely to bite a user of this software
 - Produces: stderr warning + gt over random vectors.
 
 **Steps:**
-- [ ] **Step 1:** Write test invoking `ground_truth.py --nq 5` → assert warning emitted. Run → FAIL.
-- [ ] **Step 2:** Implement warning print.
-- [ ] **Step 3:** Run test → PASS; commit.
+- [x] **Step 1:** Write test invoking `ground_truth.py --nq 5` → assert warning emitted. Run → FAIL.
+- [x] **Step 2:** Implement warning print.
+- [x] **Step 3:** Run test → PASS; commit.
 
 ## Task C8 — Pipeline: mmap vecs in build_index (finding C8, Medium)
 
@@ -492,9 +492,9 @@ The five input classes/failure modes most likely to bite a user of this software
 - Produces: memory-mapped vecs array.
 
 **Steps:**
-- [ ] **Step 1:** Write test asserting `build_index` loads vecs with `mmap_mode="r"`. Run → FAIL.
-- [ ] **Step 2:** Change `np.load` to `mmap_mode="r"`.
-- [ ] **Step 3:** Run test → PASS; commit.
+- [x] **Step 1:** Write test asserting `build_index` loads vecs with `mmap_mode="r"`. Run → FAIL.
+- [x] **Step 2:** Change `np.load` to `mmap_mode="r"`.
+- [x] **Step 3:** Run test → PASS; commit.
 
 ## Task C9 — Pipeline: WET download checksum (finding C9, Medium)
 
@@ -507,9 +507,9 @@ The five input classes/failure modes most likely to bite a user of this software
 - Produces: verified file or error.
 
 **Steps:**
-- [ ] **Step 1:** Write test monkeypatching `_remote_size` and download; corrupt content with right size → assert rejection. Run → FAIL.
-- [ ] **Step 2:** Implement sha256/ETag verification.
-- [ ] **Step 3:** Run test → PASS; commit.
+- [x] **Step 1:** Write test monkeypatching `_remote_size` and download; corrupt content with right size → assert rejection. Run → FAIL.
+- [x] **Step 2:** Implement sha256/ETag verification.
+- [x] **Step 3:** Run test → PASS; commit.
 
 ## Task C10 — Pipeline: run_e3 target filename + docs validation (finding C10, Medium)
 
@@ -522,9 +522,9 @@ The five input classes/failure modes most likely to bite a user of this software
 - Produces: non-stale targets; error on mismatch.
 
 **Steps:**
-- [ ] **Step 1:** Write test: `infer_docs_path` with different `--index` and existing root `docs.jsonl` → error or explicit. Run → FAIL.
-- [ ] **Step 2:** Implement corpus fingerprint in target filename + validation.
-- [ ] **Step 3:** Run test → PASS; commit.
+- [x] **Step 1:** Write test: `infer_docs_path` with different `--index` and existing root `docs.jsonl` → error or explicit. Run → FAIL.
+- [x] **Step 2:** Implement corpus fingerprint in target filename + validation.
+- [x] **Step 3:** Run test → PASS; commit.
 
 ## Task C11 — Pipeline: ZeroDivisionError guard (finding C11, Medium)
 
@@ -537,9 +537,9 @@ The five input classes/failure modes most likely to bite a user of this software
 - Produces: empty result instead of crash.
 
 **Steps:**
-- [ ] **Step 1:** Write test with empty questions → assert no `ZeroDivisionError`. Run → FAIL.
-- [ ] **Step 2:** Implement `if n == 0` early return with empty metrics.
-- [ ] **Step 3:** Run test → PASS; commit.
+- [x] **Step 1:** Write test with empty questions → assert no `ZeroDivisionError`. Run → FAIL.
+- [x] **Step 2:** Implement `if n == 0` early return with empty metrics.
+- [x] **Step 3:** Run test → PASS; commit.
 
 ## Task C12 — Pipeline: report skipped gates (finding C12, Low)
 
@@ -552,9 +552,9 @@ The five input classes/failure modes most likely to bite a user of this software
 - Produces: gate report marks skipped gates explicitly.
 
 **Steps:**
-- [ ] **Step 1:** Write test running `gate.py --synth` without `--pred` → assert G1/G2 present with `pass: null` and reason. Run → FAIL.
-- [ ] **Step 2:** Implement explicit skipped-gate reporting.
-- [ ] **Step 3:** Run test → PASS; commit.
+- [x] **Step 1:** Write test running `gate.py --synth` without `--pred` → assert G1/G2 present with `pass: null` and reason. Run → FAIL.
+- [x] **Step 2:** Implement explicit skipped-gate reporting.
+- [x] **Step 3:** Run test → PASS; commit.
 
 ## Task C13 — Pipeline: warmup iterations (finding C13, Low)
 
@@ -567,9 +567,9 @@ The five input classes/failure modes most likely to bite a user of this software
 - Produces: warmup + measured timings.
 
 **Steps:**
-- [ ] **Step 1:** Write test: first query slower; assert warmup excluded. Run → FAIL.
-- [ ] **Step 2:** Implement warmup loop before timed loop.
-- [ ] **Step 3:** Run test → PASS; commit.
+- [x] **Step 1:** Write test: first query slower; assert warmup excluded. Run → FAIL.
+- [x] **Step 2:** Implement warmup loop before timed loop.
+- [x] **Step 3:** Run test → PASS; commit.
 
 ## Task C14 — Pipeline: resume after final chunk (finding C14, Low)
 
@@ -582,9 +582,9 @@ The five input classes/failure modes most likely to bite a user of this software
 - Produces: resume accepts completed run.
 
 **Steps:**
-- [ ] **Step 1:** Write test (guarded by torch availability) or code-reading verification.
-- [ ] **Step 2:** Implement: `if rows_done == n_docs: treat as complete` instead of rejecting.
-- [ ] **Step 3:** Run test → PASS (or verify by reading); commit.
+- [x] **Step 1:** Write test (guarded by torch availability) or code-reading verification.
+- [x] **Step 2:** Implement: `if rows_done == n_docs: treat as complete` instead of rejecting.
+- [x] **Step 3:** Run test → PASS (or verify by reading); commit.
 
 ## Task C15 — Pipeline: centroids.npy into out dir (finding C15, Low)
 
@@ -597,9 +597,9 @@ The five input classes/failure modes most likely to bite a user of this software
 - Produces: `centroids.npy` inside `out`.
 
 **Steps:**
-- [ ] **Step 1:** Write test asserting `centroids.npy` written under `out`. Run → FAIL.
-- [ ] **Step 2:** Change `cent_path = out` (join with out dir).
-- [ ] **Step 3:** Run test → PASS; commit.
+- [x] **Step 1:** Write test asserting `centroids.npy` written under `out`. Run → FAIL.
+- [x] **Step 2:** Change `cent_path = out` (join with out dir).
+- [x] **Step 3:** Run test → PASS; commit.
 
 ---
 
@@ -612,9 +612,9 @@ The five input classes/failure modes most likely to bite a user of this software
 **Interfaces:** N/A.
 
 **Steps:**
-- [ ] **Step 1:** Remove `Cargo.lock` from `.gitignore`.
-- [ ] **Step 2:** `git add Cargo.lock`; verify tracked.
-- [ ] **Step 3:** Commit.
+- [x] **Step 1:** Remove `Cargo.lock` from `.gitignore`.
+- [x] **Step 2:** `git add Cargo.lock`; verify tracked.
+- [x] **Step 3:** Commit.
 
 ## Task T2 — Tests/CI: fake-backend parity with real contracts (finding T3, Critical; P2-14)
 
@@ -627,9 +627,9 @@ The five input classes/failure modes most likely to bite a user of this software
 - Produces: fakes matching real `Embedder`/`Reranker`/`IvfIndex` contracts.
 
 **Steps:**
-- [ ] **Step 1:** Write `test_fake_ann_ranks_by_similarity` and `test_fake_reranker_degraded_flag`. Run → FAIL.
-- [ ] **Step 2:** Align fake contracts with real backends (256-D embeddings, similarity scores, degraded mode).
-- [ ] **Step 3:** Run `pytest tests/ -m "not cloud_only" -q` → 117 pass; commit.
+- [x] **Step 1:** Write `test_fake_ann_ranks_by_similarity` and `test_fake_reranker_degraded_flag`. Run → FAIL.
+- [x] **Step 2:** Align fake contracts with real backends (256-D embeddings, similarity scores, degraded mode).
+- [x] **Step 3:** Run `pytest tests/ -m "not cloud_only" -q` → 117 pass; commit.
 
 ## Task T3 — Tests/CI: ground-truth recall test (finding T4, High)
 
@@ -642,9 +642,9 @@ The five input classes/failure modes most likely to bite a user of this software
 - Produces: recall@10 assertion > threshold (not self-match).
 
 **Steps:**
-- [ ] **Step 1:** Write test building a small index with known nearest neighbors, querying vectors NOT in the index, asserting ANN returns the true nearest neighbors. Run → FAIL.
-- [ ] **Step 2:** Implement test (uses existing test fixtures).
-- [ ] **Step 3:** Run test → PASS; commit.
+- [x] **Step 1:** Write test building a small index with known nearest neighbors, querying vectors NOT in the index, asserting ANN returns the true nearest neighbors. Run → FAIL.
+- [x] **Step 2:** Implement test (uses existing test fixtures).
+- [x] **Step 3:** Run test → PASS; commit.
 
 ## Task T4 — Tests/CI: cloud_only CI job (finding T7, High)
 
@@ -655,9 +655,9 @@ The five input classes/failure modes most likely to bite a user of this software
 **Interfaces:** N/A.
 
 **Steps:**
-- [ ] **Step 1:** Add a `cloud_only` job gated on `workflow_dispatch` (runs `pytest -m cloud_only`) so it CAN run on the box when triggered.
-- [ ] **Step 2:** Validate workflow YAML parses.
-- [ ] **Step 3:** Commit.
+- [x] **Step 1:** Add a `cloud_only` job gated on `workflow_dispatch` (runs `pytest -m cloud_only`) so it CAN run on the box when triggered.
+- [x] **Step 2:** Validate workflow YAML parses.
+- [x] **Step 3:** Commit.
 
 ## Task T5 — Tests/CI: tautological assertions (finding T12, Medium)
 
@@ -668,9 +668,9 @@ The five input classes/failure modes most likely to bite a user of this software
 **Interfaces:** N/A.
 
 **Steps:**
-- [ ] **Step 1:** Replace `assert cfg["optiona"] is False if False else True` with a real assertion on the config value.
-- [ ] **Step 2:** Replace `assert True` in test_scaffold with meaningful check.
-- [ ] **Step 3:** Run `pytest tests/ -m "not cloud_only" -q`; commit.
+- [x] **Step 1:** Replace `assert cfg["optiona"] is False if False else True` with a real assertion on the config value.
+- [x] **Step 2:** Replace `assert True` in test_scaffold with meaningful check.
+- [x] **Step 3:** Run `pytest tests/ -m "not cloud_only" -q`; commit.
 
 ## Task T6 — Tests/CI: fix CI red (ruff check + ruff format --check)
 
@@ -681,9 +681,9 @@ The five input classes/failure modes most likely to bite a user of this software
 **Interfaces:** N/A.
 
 **Steps:**
-- [ ] **Step 1:** Run `ruff check exa_home/ scripts/ tests/ notebooks/` → list all violations.
-- [ ] **Step 2:** Fix all (edits / `ruff format` on files we own — careful not to reformat unrelated files beyond our changes; use targeted edits).
-- [ ] **Step 3:** Run `ruff check` → clean; `ruff format --check` → clean; commit.
+- [x] **Step 1:** Run `ruff check exa_home/ scripts/ tests/ notebooks/` → list all violations.
+- [x] **Step 2:** Fix all (edits / `ruff format` on files we own — careful not to reformat unrelated files beyond our changes; use targeted edits).
+- [x] **Step 3:** Run `ruff check` → clean; `ruff format --check` → clean; commit.
 
 ## Task T7 — Tests/CI: run full gate (scripts/gate.py --synth) in CI already present — verify exit code meaningful (finding C12/T6 overlap)
 
@@ -691,8 +691,8 @@ The five input classes/failure modes most likely to bite a user of this software
 - Test: CI step already runs it; ensure nonzero exit on failure.
 
 **Steps:**
-- [ ] **Step 1:** Run `scripts/gate.py --synth --n-docs 200 --json` → confirm exit 0 on pass, nonzero on fail (e.g. `--min-recall` analog).
-- [ ] **Step 2:** Commit if no change needed (verify only).
+- [x] **Step 1:** Run `scripts/gate.py --synth --n-docs 200 --json` → confirm exit 0 on pass, nonzero on fail (e.g. `--min-recall` analog).
+- [x] **Step 2:** Commit if no change needed (verify only).
 
 ---
 
@@ -702,8 +702,8 @@ The five input classes/failure modes most likely to bite a user of this software
 - Modify: `README.md:89-90` ("77 passed" → "117 passed", "13 passed" → "28 passed"); `HANDOFF.md:236,370` ("108 passed" → "117 passed")
 
 **Steps:**
-- [ ] **Step 1:** Edit counts to 117 / 28.
-- [ ] **Step 2:** Commit.
+- [x] **Step 1:** Edit counts to 117 / 28.
+- [x] **Step 2:** Commit.
 
 ## Task D2 — Docs: remove unverifiable 1M headline numbers (finding D2, Critical)
 
@@ -711,8 +711,8 @@ The five input classes/failure modes most likely to bite a user of this software
 - Modify: `README.md:11-13`, `EXPERIMENTS.md` M9 row, `WORKPLAN.md:8-9`, zenno plan/audit files citing 75.562/131.151/0.359 — replace with "measured on box, ledger row not committed; see runs.jsonl" or remove the specific numbers.
 
 **Steps:**
-- [ ] **Step 1:** Edit each doc to mark 1M numbers as unverifiable / remove exact figures pending re-measurement.
-- [ ] **Step 2:** Commit.
+- [x] **Step 1:** Edit each doc to mark 1M numbers as unverifiable / remove exact figures pending re-measurement.
+- [x] **Step 2:** Commit.
 
 ## Task D3 — Docs: fulfill "one config" promise (finding D3, High; overlaps P4/C4)
 
@@ -721,8 +721,8 @@ The five input classes/failure modes most likely to bite a user of this software
 - Test: none (docs)
 
 **Steps:**
-- [ ] **Step 1:** Update README "one config" paragraph to reflect reality (config.py + config_loader Lane B; gate/e2e read OPERATING_POINT after fixes).
-- [ ] **Step 2:** Commit.
+- [x] **Step 1:** Update README "one config" paragraph to reflect reality (config.py + config_loader Lane B; gate/e2e read OPERATING_POINT after fixes).
+- [x] **Step 2:** Commit.
 
 ## Task D4 — Docs: remove duplicated paragraph (finding D4, Medium)
 
@@ -730,8 +730,8 @@ The five input classes/failure modes most likely to bite a user of this software
 - Modify: `README.md:27-34` (remove duplicate of 18-25)
 
 **Steps:**
-- [ ] **Step 1:** Delete duplicate block.
-- [ ] **Step 2:** Commit.
+- [x] **Step 1:** Delete duplicate block.
+- [x] **Step 2:** Commit.
 
 ## Task D5 — Docs: cloud_only count 6→7 (finding D5, Medium)
 
@@ -739,8 +739,8 @@ The five input classes/failure modes most likely to bite a user of this software
 - Modify: `README.md:149`, `HANDOFF.md`, `WORKPLAN.md`, zenno files citing "6 cloud_only tests" → "7".
 
 **Steps:**
-- [ ] **Step 1:** Update all references to 7.
-- [ ] **Step 2:** Commit.
+- [x] **Step 1:** Update all references to 7.
+- [x] **Step 2:** Commit.
 
 ## Task D6 — Docs: e3_result_box is toy copy (finding D6, Medium)
 
@@ -748,8 +748,8 @@ The five input classes/failure modes most likely to bite a user of this software
 - Modify: `eval/e3_result_box_2026-10-25.json` (regenerate or remove; better: add note it's a toy copy) + `README.md` references.
 
 **Steps:**
-- [ ] **Step 1:** Either remove `eval/e3_result_box_2026-10-25.json` or annotate it as a copy of the toy result; update docs not to cite it as 1M evidence.
-- [ ] **Step 2:** Commit.
+- [x] **Step 1:** Either remove `eval/e3_result_box_2026-10-25.json` or annotate it as a copy of the toy result; update docs not to cite it as 1M evidence.
+- [x] **Step 2:** Commit.
 
 ## Task D7 — Docs: threshold contradiction (finding D7, Medium)
 
@@ -757,8 +757,8 @@ The five input classes/failure modes most likely to bite a user of this software
 - Modify: `README.md:155-156` (align with `scripts/gate.py` thresholds; threshold IS set in gate.py, measure_recall.py default None)
 
 **Steps:**
-- [ ] **Step 1:** Edit README threshold paragraph.
-- [ ] **Step 2:** Commit.
+- [x] **Step 1:** Edit README threshold paragraph.
+- [x] **Step 2:** Commit.
 
 ## Task D8 — Docs: stale status claims (finding D8, High)
 
@@ -766,8 +766,8 @@ The five input classes/failure modes most likely to bite a user of this software
 - Modify: `HANDOFF.md` (last commit, license, 1M build status, ledger rows), `zenno/plans/2026-10-26-item-3-four-gates.md` (gates/CI exist), `zenno/plans/2026-10-28-v0.9-release-ops.md` (1M numbers)
 
 **Steps:**
-- [ ] **Step 1:** Update each stale claim to current state.
-- [ ] **Step 2:** Commit.
+- [x] **Step 1:** Update each stale claim to current state.
+- [x] **Step 2:** Commit.
 
 ## Task D9 — Docs: missing open-source docs (finding D9, Medium)
 
@@ -775,20 +775,20 @@ The five input classes/failure modes most likely to bite a user of this software
 - Create: `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, `CHANGELOG.md` (initial), `.github/ISSUE_TEMPLATE/`, `.github/PULL_REQUEST_TEMPLATE.md`, docs for MCP tool schema, model-license/attribution doc.
 
 **Steps:**
-- [ ] **Step 1:** Create `SECURITY.md` (disclosure contact, supported versions).
-- [ ] **Step 2:** Create `CONTRIBUTING.md` (how to build, test, release).
-- [ ] **Step 3:** Create `CODE_OF_CONDUCT.md`, `CHANGELOG.md`, issue/PR templates, MCP API doc, license/attribution doc.
-- [ ] **Step 4:** Commit.
+- [x] **Step 1:** Create `SECURITY.md` (disclosure contact, supported versions).
+- [x] **Step 2:** Create `CONTRIBUTING.md` (how to build, test, release).
+- [x] **Step 3:** Create `CODE_OF_CONDUCT.md`, `CHANGELOG.md`, issue/PR templates, MCP API doc, license/attribution doc.
+- [x] **Step 4:** Commit.
 
 ---
 
 ## Verification gate (run before declaring complete)
 
-- [ ] `.venv/bin/python -m pytest tests/ -m "not cloud_only" -q` → 117+ pass
-- [ ] `PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 cargo test -p ann-core` → 28+ pass
-- [ ] `.venv/bin/ruff check exa_home/ scripts/ tests/ notebooks/` → clean
-- [ ] `.venv/bin/ruff format --check exa_home/ scripts/ tests/ notebooks/` → clean
-- [ ] `PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 cargo fmt --check -p ann-core` → clean
-- [ ] `git status --short` → only intended fixes on `audit/fix-all-findings`, nothing pushed
+- [x] `.venv/bin/python -m pytest tests/ -m "not cloud_only" -q` → 117+ pass
+- [x] `PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 cargo test -p ann-core` → 28+ pass
+- [x] `.venv/bin/ruff check exa_home/ scripts/ tests/ notebooks/` → clean
+- [x] `.venv/bin/ruff format --check exa_home/ scripts/ tests/ notebooks/` → clean
+- [x] `PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 cargo fmt --check -p ann-core` → clean
+- [x] `git status --short` → only intended fixes on `audit/fix-all-findings`, nothing pushed
 
 **Execution method:** Native (single session), one task at a time, committing after each task passes its verification gate.
