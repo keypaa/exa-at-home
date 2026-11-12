@@ -256,7 +256,7 @@ def stage_index(
     from scripts.train_centroids import main as train_main
 
     t0 = time.perf_counter()
-    cent_path = os.path.join(os.path.dirname(out.rstrip("/")) or ".", "centroids.npy")
+    cent_path = os.path.join(out, "centroids.npy")
     # One hash pass over the vectors per call (5 GB at full scale): that is
     # the price of a reuse decision that can actually detect a mismatch.
     src = source_identity(vecs_path, ids_path, docs_path)

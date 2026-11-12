@@ -24,15 +24,6 @@ document prefixes instead of questions — see [`EXPERIMENTS.md`](EXPERIMENTS.md
 M5/M5f/M5h and [`LEARNINGS.md`](LEARNINGS.md) §4, §13–14. The plan lives in
 [`WORKPLAN.md`](WORKPLAN.md).
 
-**On question-like queries** (50 natural questions, known target pages):
-target recall@10 **0.740** either way, target MRR@10 **0.641 → 0.712** with
-the cross-encoder, no degradations — so the reranker **stays** (the
-pre-registered rule fired; the effect is favourable but not significant at
-n=50). The earlier "the reranker hurts" reading came from measuring it with
-document prefixes instead of questions — see [`EXPERIMENTS.md`](EXPERIMENTS.md)
-M5/M5f/M5h and [`LEARNINGS.md`](LEARNINGS.md) §4, §13–14. The plan lives in
-[`WORKPLAN.md`](WORKPLAN.md).
-
 ## How it works
 
 ```
@@ -86,8 +77,8 @@ python -m venv .venv && source .venv/bin/activate
 pip install -e .[dev]
 export PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1  # only on Python 3.14 + PyO3 0.22
 cd crates/ann-core && maturin develop && cd ../..
-python -m pytest tests/ -m "not cloud_only" -q   # 77 passed
-cargo test -p ann-core                            # 13 passed
+python -m pytest tests/ -m "not cloud_only" -q   # 117 passed
+cargo test -p ann-core                            # 28 passed
 ```
 
 Anything needing a model, GPU, or >1k docs is `@pytest.mark.cloud_only`
@@ -146,14 +137,15 @@ to `runs.jsonl` — **commit it + `q/gt/pred.jsonl` and push before leaving**
 
 - **Tier-0** (local CI): 100–500 synth docs, hash embeddings, numpy/Rust fakes. Seconds.
 - **Tier-2** (`cloud_only`): 10k toy → 1–5M builds. Real GPU/model/latency.
-  These 6 tests are **not run by any CI job** (they need the box) — see
+  These 7 tests are **not run by any CI job** (they need the box) — see
   WORKPLAN.md.
 
 Recall gate: every index change reports recall@10 vs brute-force ground
 truth (`ground_truth.py --queries`, aligned to the gate queries — the
 random-vector path scores 0.0000 by construction). `measure_recall.py
---min-recall` exits 1 below a threshold, but **the threshold is not set
-yet and no CI step runs it** — the gate is currently manual/cloud-only.
+--min-recall` exits 1 below a threshold (default `None`; `scripts/gate.py`
+implements G1–G4 with hardcoded thresholds and CI runs `gate.py --synth`)
+— the full real-index gate is manual/cloud-only.
 
 ## Status / roadmap
 

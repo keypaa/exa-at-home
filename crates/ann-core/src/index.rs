@@ -364,8 +364,8 @@ mod tests {
         fs::write(dir.join(CENTROIDS_FILE), &craw).unwrap();
         // codes: doc0/doc1 bit0=1, doc2/doc3 bit0=0, rest 0.
         let mut brow = vec![0u8; 4 * CODE_BYTES];
-        brow[0 * CODE_BYTES] = 0x01;
-        brow[1 * CODE_BYTES] = 0x01;
+        brow[0] = 0x01;
+        brow[CODE_BYTES] = 0x01;
         fs::write(dir.join(CODES_FILE), &brow).unwrap();
         // lists: K=2, list0=[0,1], list1=[2,3].
         let mut lraw = Vec::new();
