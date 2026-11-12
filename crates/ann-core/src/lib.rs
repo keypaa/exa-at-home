@@ -8,6 +8,12 @@ use numpy::{PyReadonlyArray1, PyReadonlyArray2};
 use pyo3::{exceptions::PyValueError, prelude::*, types::PyModule, Bound};
 use std::cmp::Ordering;
 
+// Upper bound on matrix elements accepted from the caller. A malicious or
+// malformed numpy view can report an enormous shape; allocating
+// `nrows * ncols` elements up front would abort the process (PyO3 panics
+// propagate as SIGABRT). Cap it so we return a clean ValueError instead.
+pub const MAX_MATRIX_ELEMENTS: usize = 64_000_000;
+
 /// Descending score comparison (best score first) that is a *total* order.
 ///
 /// `f32::partial_cmp` returns `None` when either side is NaN, so the old
@@ -104,9 +110,24 @@ impl AnnIndex {
                 ids.len()
             )));
         }
+        // Bound the allocation before touching the shape: a strided view can
+        // report an absurd ncols, and `nrows * ncols` can overflow or
+        // request enough RAM to abort the process. Return a clean error
+        // instead of panicking (finding R1/R2).
+        let n_elements = a
+            .nrows()
+            .checked_mul(a.ncols())
+            .ok_or_else(|| {
+                PyValueError::new_err("AnnIndex::new: matrix shape overflow (nrows * ncols)")
+            })?;
+        if n_elements > MAX_MATRIX_ELEMENTS {
+            return Err(PyValueError::new_err(format!(
+                "AnnIndex::new: matrix has {n_elements} elements (> {MAX_MATRIX_ELEMENTS} cap)"
+            )));
+        }
         // Element-wise copy (not a flat as_slice().unwrap()): tolerates
         // non-contiguous / Fortran-order matrices instead of panicking.
-        let mut rows = Vec::with_capacity(a.nrows() * a.ncols());
+        let mut rows = Vec::with_capacity(n_elements);
         for i in 0..a.nrows() {
             let row = a.row(i);
             rows.extend(row.iter().copied());

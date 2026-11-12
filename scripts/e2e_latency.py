@@ -139,6 +139,13 @@ def run_latency(dag, queries: list[dict], k: int, verbose: bool = False) -> dict
 
     from exa_home.orch import run_search
 
+    # Warmup: run the first query(ies) once so cold-start costs (Rust/PyO3
+    # lazy init, thread-pool spawn, page faults) are not measured. Warmup
+    # results are discarded; only timed queries feed the percentiles.
+    # (Finding C13: previously the first cold query biased p50/p99.)
+    for q in queries[:2]:
+        run_search(dag, q["query"], q.get("filters"), top_k=k, profile=True)
+
     t_run = time.perf_counter()
     per_stage = {s: [] for s in STAGE_ORDER}
     breakdown: dict = {s: [] for s in BREAKDOWN_KEYS}

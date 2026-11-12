@@ -5,7 +5,7 @@ import hashlib
 import json
 from collections.abc import Iterator
 from dataclasses import dataclass
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 from warcio.archiveiterator import ArchiveIterator
 
@@ -41,12 +41,12 @@ def _title_from_url(url: str) -> str:
     if not url:
         return ""
     try:
-        tail = urlsplit(url).path.rsplit("/", 1)[-1]
+        tail = unquote(urlsplit(url).path.rsplit("/", 1)[-1])
     except ValueError:
         return ""
     if not tail:
         return ""
-    base = tail.rsplit(".", 1)[0]
+    base = "".join(ch for ch in tail if ch.isprintable()).rsplit(".", 1)[0]
     parts = [p for p in base.replace("_", " ").replace("-", " ").split() if p]
     if not parts or parts == [base] and len(base) > 60:
         return ""

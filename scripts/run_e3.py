@@ -147,22 +147,27 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Q{i:<3} coarse_pos={c_pos:<3} reranked_pos={r_pos:<3} deg={deg}")
 
     n = len(rows)
+    if n == 0:
+        c_hit = r_hit = 0
+        c_mrr = r_mrr = 0.0
+        wins = losses = 0
+    else:
 
-    def hit(p):
-        return 1 if 1 <= p <= 10 else 0
+        def hit(p):
+            return 1 if 1 <= p <= 10 else 0
 
-    def mrr(p):
-        return (1.0 / p) if 1 <= p <= 10 else 0.0
+        def mrr(p):
+            return (1.0 / p) if 1 <= p <= 10 else 0.0
 
-    c_hit = sum(hit(r["coarse_pos"]) for r in rows)
-    r_hit = sum(hit(r["reranked_pos"]) for r in rows)
-    c_mrr = sum(mrr(r["coarse_pos"]) for r in rows) / n
-    r_mrr = sum(mrr(r["reranked_pos"]) for r in rows) / n
-    wins = sum(1 for r in rows if hit(r["reranked_pos"]) and not hit(r["coarse_pos"]))
-    losses = sum(1 for r in rows if hit(r["coarse_pos"]) and not hit(r["reranked_pos"]))
+        c_hit = sum(hit(r["coarse_pos"]) for r in rows)
+        r_hit = sum(hit(r["reranked_pos"]) for r in rows)
+        c_mrr = sum(mrr(r["coarse_pos"]) for r in rows) / n
+        r_mrr = sum(mrr(r["reranked_pos"]) for r in rows) / n
+        wins = sum(1 for r in rows if hit(r["reranked_pos"]) and not hit(r["coarse_pos"]))
+        losses = sum(1 for r in rows if hit(r["coarse_pos"]) and not hit(r["reranked_pos"]))
 
     print(f"\n=== E3 RESULT (n={n}) ===")
-    print(f"target recall@10   coarse={c_hit / n:.3f}   reranked={r_hit / n:.3f}")
+    print(f"target recall@10   coarse={c_hit / n if n else 0.0:.3f}   reranked={r_hit / n if n else 0.0:.3f}")
     print(f"target MRR@10       coarse={c_mrr:.3f}   reranked={r_mrr:.3f}")
     print(f"paired: reranker wins {wins} / loses {losses} / ties {n - wins - losses}")
 

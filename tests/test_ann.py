@@ -394,3 +394,20 @@ def test_filter_kwargs_without_filter_dir_raise(tmp_path):
     idx = IvfIndex.load(str(tmp_path))
     with pytest.raises(Exception, match="filter"):
         idx.search(vecs[0], nprobe=2, n_coarse=10, domains=["example.com"])
+
+
+def test_ann_index_rejects_absurd_strided_shape():
+    # A strided view reporting an enormous shape must raise a clean
+    # ValueError, not abort the process (SIGABRT) via an out-sized
+    # Vec::with_capacity. See findings R1/R2.
+    from ann_core import AnnIndex
+
+    buf = np.array([1.0], dtype=np.float32)  # 4-byte buffer
+    view = np.lib.stride_tricks.as_strided(buf, shape=(1, 10**12), strides=(0, 0))
+    with pytest.raises(ValueError, match="elements|cap|overflow"):
+        AnnIndex(view, ["x"])
+
+    # A small well-formed matrix still works.
+    vecs = np.array([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32)
+    ids, _scores = AnnIndex(vecs, ["a", "b"]).search(np.array([1.0, 0.0], dtype=np.float32), top_k=2)
+    assert ids == ["a", "b"]
