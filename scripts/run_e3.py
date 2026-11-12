@@ -21,21 +21,77 @@ QUESTIONS = ROOT / "eval" / "questions_toy_20261021.json"
 TARGETS = ROOT / "eval" / "sampled_targets.json"
 
 
-def targets_path_for(docs: Path) -> Path:
-    """One target set per corpus, so stale 4WET targets never get reused."""
-    return ROOT / "eval" / f"sampled_targets.{docs.stem}.json"
+def targets_path_for(docs: Path, fingerprint: str = "") -> Path:
+    """One target set per CORPUS, not per file name.
+
+    The old name was derived from docs.stem only, so re-ingesting into the
+    same path silently reused target ids that no longer existed in the new
+    corpus (finding C10). The fingerprint is the docs content hash.
+    """
+    suffix = f".{fingerprint[:12]}" if fingerprint else ""
+    return ROOT / "eval" / f"sampled_targets.{docs.stem}{suffix}.json"
 
 
 def infer_docs_path(root: Path, index_dir: Path) -> Path:
-    if (root / "docs.jsonl").is_file():
-        return root / "docs.jsonl"
+    """Pick the docs file belonging to `index_dir`.
+
+    Corpus-named docs (index_1wet -> docs_1wet.jsonl) win over the root
+    docs.jsonl: preferring the root file meant `--index index_1wet` was
+    evaluated against the TOY corpus whenever both existed (finding C10).
+    The result is still validated against the index's recorded source.
+    """
     stem = index_dir.name
-    if (
-        stem.startswith("index")
-        and (root / ("docs" + stem[len("index") :] + ".jsonl")).is_file()
-    ):
-        return root / ("docs" + stem[len("index") :] + ".jsonl")
+    if stem.startswith("index"):
+        candidate = root / ("docs" + stem[len("index") :] + ".jsonl")
+        if candidate.is_file():
+            return candidate
     return root / "docs.jsonl"
+
+
+def docs_fingerprint(docs: Path) -> str:
+    from exa_home.index_format import sha256
+
+    return sha256(str(docs))
+
+
+def validate_docs_for_index(docs: Path, index_dir: Path) -> str:
+    """Return the docs content hash, or raise when it is not this index's corpus.
+
+    The index records its source identity at build time. Without this check
+    a stale docs.jsonl (or an explicit --docs pointing at another corpus)
+    produced target ids from a corpus the index never saw.
+    """
+    from scripts.build_index import read_source
+
+    src = read_source(str(index_dir))
+    got = docs_fingerprint(docs)
+    if not src:
+        print(
+            f"warning: {index_dir} has no source provenance; "
+            "cannot validate --docs against it",
+            file=sys.stderr,
+        )
+        return got
+    want = src.get("docs_sha256")
+    if want:
+        if got != want:
+            raise ValueError(
+                f"{docs} does not match the corpus {index_dir} was built from "
+                f"(docs sha256 {got[:12]} != {want[:12]})"
+            )
+        return got
+    # Legacy index written before docs hashing: only size is available.
+    want_size = src.get("docs_size")
+    if want_size is not None and os.path.getsize(docs) != want_size:
+        raise ValueError(
+            f"{docs} does not match the corpus {index_dir} was built from "
+            f"(size {os.path.getsize(docs)} != {want_size})"
+        )
+    print(
+        "warning: index provenance predates docs hashing; only size checked",
+        file=sys.stderr,
+    )
+    return got
 
 
 def find_repo_root() -> Path:
@@ -106,10 +162,14 @@ def main(argv: list[str] | None = None) -> int:
     docs_path = Path(args.docs) if args.docs else infer_docs_path(root, index_dir)
     if not docs_path.is_absolute():
         docs_path = root / docs_path
+    try:
+        docs_fp = validate_docs_for_index(docs_path, index_dir)
+    except ValueError as e:
+        raise SystemExit(f"run_e3: {e}") from e
     store = ContentStore(str(index_dir / "store"))
     ann = IvfIndex.load(str(index_dir))
 
-    target_file = targets_path_for(docs_path)
+    target_file = targets_path_for(docs_path, docs_fp)
     targets = (
         json.loads(target_file.read_text())
         if target_file.exists()

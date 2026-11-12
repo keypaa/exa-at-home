@@ -531,23 +531,31 @@ def test_select_slice_max_parts_strided_sample():
 
 def test_download_skips_complete_files(tmp_path, monkeypatch):
     """Skip-existing path needs no network once the size check is mocked."""
+    import gzip
+
     import scripts.download_wet as dw
 
+    payload = gzip.compress(b"data" * 100, mtime=0)
     f = tmp_path / "x.wet.gz"
-    f.write_bytes(b"data" * 100)
-    monkeypatch.setattr(dw, "_remote_size", lambda url: 400)
+    f.write_bytes(payload)
+    monkeypatch.setattr(dw, "_remote_size", lambda url: len(payload))
     path, size = dw.fetch_one("https://example.com/x.wet.gz", str(tmp_path))
-    assert (path, size) == (str(f), 400)
-    assert f.read_bytes() == b"data" * 100  # untouched
+    assert (path, size) == (str(f), len(payload))
+    assert f.read_bytes() == payload  # untouched (and gzip-verified)
 
 
 def test_download_resumes_partial_file(tmp_path, monkeypatch):
     """Range-resume append logic with a stubbed transport (offline)."""
+    import gzip
+    import random
     import urllib.request
 
     import scripts.download_wet as dw
 
-    full = b"0123456789abcdef" * 64  # 1024 bytes
+    # Incompressible payload so the gzip is bigger than the resume offset.
+    rng = random.Random(0)
+    full = gzip.compress(bytes(rng.getrandbits(8) for _ in range(4096)), mtime=0)
+    assert len(full) > 800
     f = tmp_path / "y.wet.gz"
     f.write_bytes(full[:400])
     seen = {}
@@ -575,7 +583,7 @@ def test_download_resumes_partial_file(tmp_path, monkeypatch):
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
     path, size = dw.fetch_one("https://example.com/y.wet.gz", str(tmp_path))
-    assert size == 1024
+    assert size == len(full)
     assert Path(path).read_bytes() == full
 
 

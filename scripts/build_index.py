@@ -74,6 +74,9 @@ def source_identity(vecs_path: str, ids_path: str, docs_path: str) -> dict:
     return {
         "docs": docs_path,
         "docs_size": _file_size(docs_path),
+        # Content hash, not just size: run_e3 uses it to prove the docs it
+        # is evaluating are the corpus this index was built from (C10).
+        "docs_sha256": sha256(docs_path),
         "vecs": vecs_path,
         "vecs_size": _file_size(vecs_path),
         "vecs_sha256": sha256(vecs_path),
