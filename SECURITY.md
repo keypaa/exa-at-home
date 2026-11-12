@@ -22,18 +22,53 @@ fix and disclosure timeline.
 
 ## Known security considerations (read first)
 
-- The FastMCP server (`exa_home/mcp_server.py`) exposes `home_search`,
-  `home_contents`, and `home_health`. The current build ships **no auth
-  token, no rate limiter, and no `--bind`/`--host` flag**; the default bind
-  is loopback (`127.0.0.1`), but `FASTMCP_HOST=0.0.0.0` exposes all
-  interfaces. Do not expose the server to untrusted networks until auth and
-  rate limiting are added (tracked in `SECURITY.md` / the audit report).
-- The content store (`exa_home/store.py`) trusts `store/offsets.json`; an
-  attacker-controlled index directory can lead to path traversal. Only serve
-  index directories you trust.
-- The corpus is Common Crawl (attacker-controlled web text). `home_contents`
-  returns raw document text with no sanitization or provenance marking —
-  treat returned text as untrusted (prompt-injection risk).
+### The MCP server (`exa_home/mcp_server.py`)
 
-See the full audit report (`/tmp/opencode/audit/AUDIT_REPORT.md` in the
-maintainer's checkout) for the complete findings list.
+- The default bind is **loopback** (`127.0.0.1`). Exposing the server
+  beyond the machine is an explicit choice (`--host`).
+- HTTP transport is **bearer-token authenticated** (`--token` /
+  `EXA_MCP_TOKEN`) and **rate-limited** (sliding window,
+  `--rate-limit`, calls/minute per server). Both run as FastMCP
+  middleware. `--config` may replace the serving operating point, and tool
+  failures are redacted (`mask_error_details` + a wrapper that converts
+  internal exceptions into `{"error": {...}}` shapes) so exception types,
+  messages and internal paths never cross the boundary.
+- If `--token` is not set over HTTP, the server runs **unauthenticated**;
+  it prints a warning at startup. Keep it on loopback or set a token.
+- `home_contents` is paginated (`PAGE_SIZE = 20` ids per call,
+  `max_chars_per_doc` capped at 20 000 chars); `home_search` bounds the
+  query length and `top_k`; validation errors are the caller's, internal
+  errors are never echoed.
+
+### The corpus is attacker-controlled
+
+`home_search` / `home_contents` return Common Crawl text. Every corpus
+string is passed through a control/format-character stripper and tagged
+`"provenance": "corpus"`, `"untrusted": true` so a downstream agent can
+treat it as data, never instructions. That marking is not a sanitisation
+boundary by itself: text content is preserved, the flag is the contract.
+
+### The content store and the index manifest
+
+- `store/offsets.json` shard paths are contained under the store root
+  (absolute paths and `..` traversal entries are dropped), and every
+  record carries a content digest: a record mutated in place under a known
+  id resolves to a **miss**, not substituted content.
+- `index/manifest.json` is an **integrity** check (per-file sha256,
+  fail-fast verify on load), not an **authenticity** check: whoever can
+  replace the index files can replace the manifest. Only serve index
+  directories you trust — or hook `verify_manifest_signature` to an
+  out-of-band signature/trust anchor.
+- The content store (`store/`) is deliberately excluded from the manifest
+  (it is corpus, and hashing it made every load O(corpus)).
+
+### Pipeline provenance gates
+
+`scripts/run_pipeline.py` re-uses artifacts only when the recorded input
+identity still matches: the WET download set (exact URL match, foreign
+files pruned), `docs.jsonl` (WET fingerprint sidecar), and
+`q.jsonl`/`gt.jsonl` (docs/vecs/ids/nq fingerprint sidecar). WET downloads
+are gzip-verified (CRC/ISIZE) before being treated as complete.
+
+The 2026-11-12 audit's full findings list and fix status live in
+[`zenno/plans/2026-11-12-exa-at-home-fix-all-audit-findings.md`](zenno/plans/2026-11-12-exa-at-home-fix-all-audit-findings.md).

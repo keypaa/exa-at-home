@@ -43,6 +43,16 @@ Common Crawl WET slice
   → home_search / home_contents (FastMCP, runnable: python -m exa_home.mcp_server)
 ```
 
+Serving notes: loopback by default; `--transport http` adds a bearer token
+(`--token` / `EXA_MCP_TOKEN`) and a per-minute rate limit
+(`--rate-limit`), and `--config` may replace the serving operating point.
+Full tool schema and flags: [`docs/MCP_API.md`](docs/MCP_API.md); the
+threat model and trust boundaries are in
+[`SECURITY.md`](SECURITY.md). Two optional config layers exist:
+`config.py` is the single source of truth for the operating point, and
+`config_loader.py` (Lane B) adapts presets to a hardware profile when you
+pass `--config`.
+
 Funnel principle: expensive full-precision work touches ~200 docs, never 5M.
 5M docs need ~160MB of binary codes; there is no float store — the
 reranker re-reads text from the content store (byte-offset index makes
@@ -54,6 +64,20 @@ batch_size 32, budget 100ms`), the model names, the K values and the
 crawl. The library, the scripts, the notebook and the MCP server all read
 it — which is how the shipped tool is prevented from drifting away from
 the configuration we actually measured.
+
+**There is a second, optional config layer.**
+[`exa_home/config_loader.py`](exa_home/config_loader.py) (Lane B) reads a
+YAML/JSON hardware profile (`tiny` / `rtx-3090-classic` /
+`rtx-pro-6000-classic`) and maps it onto preset batch/chunk/`top_coarse`
+values. It is an *adaptation* layer, not a second source of truth:
+`config.py:OPERATING_POINT` remains what the serving path, `gate.py` and
+`e2e_latency.py` read by default, and the MCP server only swaps it for the
+loaded profile when you pass `--config`. Since the 2026-11-12 audit the
+loader is strict — unknown or typo'd keys (and a `hardware` block with bad
+types) are rejected with a `ValueError` instead of silently deferring to
+the defaults, and an explicit `operating_point` may not contradict
+`serving`. That strictness is what makes a config file trustworthy enough
+to hand to the server.
 
 ## Layout
 
@@ -82,7 +106,7 @@ python -m venv .venv && source .venv/bin/activate
 pip install -e .[dev]
 export PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1  # only on Python 3.14 + PyO3 0.22
 cd crates/ann-core && maturin develop && cd ../..
-python -m pytest tests/ -m "not cloud_only" -q   # 117 passed
+python -m pytest tests/ -m "not cloud_only" -q   # 167 passed, 7 deselected
 cargo test -p ann-core                            # 28 passed
 ```
 

@@ -1,0 +1,40 @@
+name: Bug report
+description: Runtime behaviour contradicts the documented/measured contract
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not use this form for security issues — see SECURITY.md.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened / what you expected
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction (command or script)
+    validations:
+      required: true
+  - type: input
+    id: head
+    attributes:
+      label: git rev-parse HEAD
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - ingest / store
+        - embed / rerank
+        - Rust ANN
+        - pipeline
+        - gate / measurements
+        - MCP server
+        - docs
+    validations:
+      required: true
