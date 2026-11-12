@@ -8,11 +8,16 @@ Target box: RTX PRO 6000 Blackwell (96GB VRAM), 160GB RAM. ANN stays on CPU
 on purpose — faithful to how Exa does it; the GPU serves query embedding +
 rerank only.
 
-**1 M result (2 576 778 indexed docs, 130 WET, K=10 000, cc-main 2026-34): total
+**1 M box measurement (2 576 778 indexed docs, 130 WET, K=10 000, cc-main 2026-34): total
 p50 75.562 ms / p99 131.151 ms vs the 100 ms budget — PASS.** Ledger-backed:
 **G1 0.359 vs ≥ 0.1885**, **G3 p50 75.562, G4 advisory 0.350/0.380.**
+These 1 M figures are box measurements; their ledger rows are **not committed**
+to `runs.jsonl`, so they are not reproducible from this repo as it stands
+(see the audit report, finding D2). Re-measure and commit the ledger rows
+before citing these as reproduced results.
 The G2 question-coverage baseline measured on this corpus is not comparable
-to the toy (see `eval/e3_result_box_2026-10-25.json`). Previous toy result was
+to the toy (the box G2 result file was a copy of the toy result and has been
+removed — see the audit report, finding D6). Previous toy result was
 43.67 ms (81 k docs, np8 / tc50 / pt64 / b32).
 
 **On question-like queries** (50 natural questions, known target pages):

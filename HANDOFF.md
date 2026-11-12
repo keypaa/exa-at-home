@@ -4,7 +4,7 @@
 read `ROADMAP.md` and `WORKPLAN.md`. Together they are the complete state
 of the project, what it is, what works, what is open, and what to do next.
 
-Last updated: 2026-10-24. Latest commit: `ff2b551`.
+Last updated: 2026-11-12. Latest commit: `7c80bd7` (audit/fix-all-findings branch, local).
 
 ---
 
@@ -108,7 +108,7 @@ zenno/           Design spec + implementation plan (historical, banner-marked)
 | Measurement harness | Works | `sweep.py` (4-D grid, timestamped artifacts, full-config ledger), `e2e_latency` (p50/p99 + waterfall integrity), `score_relevance` (judged precision@10) |
 | Notebook (molab) | Works | self-bootstrapping, literate, Plotly, ran the whole session unattended-ish |
 | CI | Green | ruff 0.17, pytest, cargo test, cargo fmt — every push |
-| Ledger | 21 rows | 5 with full config + recall; 16 older notebook rows lack knobs |
+| Ledger | 31 rows | runs.jsonl; toy/81k-document measurements plus index_4wet gate rows |
 
 ### The numbers
 
@@ -132,10 +132,10 @@ zenno/           Design spec + implementation plan (historical, banner-marked)
 
 - **MCP server**: runnable now (`python -m exa_home.mcp_server --index index/`), but never benchmarked against a real index. No latency/recall numbers for the shipped surface.
 - **Corpus mismatch**: the toy came from the *unranked* slice → spam-heavy, multilingual, 73.7% mostly-ASCII. A 1M density-ranked build is English-only. Toy ≠ 1M corpus.
-- **6 `cloud_only` tests never run anywhere** — no cloud CI job.
-- **The recall threshold**: the README claims "below-threshold recall fails CI" — no threshold is set, no CI step runs it. The gate is currently manual/cloud-only.
+- **7 `cloud_only` tests** — run only via the new `cloud_only` CI job (workflow_dispatch / weekly schedule); not on every push.
+- **The recall threshold**: `scripts/gate.py` implements G1–G4 with hardcoded thresholds and CI runs `gate.py --synth`; the full real-index gate remains manual/cloud-only.
 - **Scale blockers closed** (filter build RAM, posting lists, ground truth, store hashing) — see the audit wave. Remaining: `stage_ingest`'s URL-dedup set (~660MB at 5M URLs, inherent to URL-second dedup).
-- **The 1M build itself**: unstarted.
+- **The 1M build**: exists (manifest.json: n_docs=2,576,778, K=10,000), but its p50/p99/G1 ledger rows are **not committed** to runs.jsonl — not reproducible from this repo as it stands.
 
 ---
 
