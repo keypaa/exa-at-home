@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import glob
+import hashlib
 import itertools
 import json
 import os
@@ -52,6 +53,68 @@ def wet_files(wet_dir: str) -> list[str]:
 
 def _log(stage: str, t0: float, extra: str = "") -> None:
     print(f"[{stage}] done in {time.perf_counter() - t0:.1f}s{extra}", flush=True)
+
+
+# ---- provenance sidecars --------------------------------------------------
+# A stage may only reuse an artifact when the inputs it was built from are
+# still the same. Existence alone let a stale docs.jsonl / q.jsonl / index
+# be consumed by a different crawl (findings C1/C2/C3); the gate then
+# measured artifacts the pipeline had not actually produced.
+
+
+def _sha256_file(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _file_sha_and_lines(path: str) -> tuple[str, int]:
+    """One pass: sha256 + newline count (artifacts are newline-terminated)."""
+    h = hashlib.sha256()
+    n = 0
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+            n += chunk.count(b"\n")
+    return h.hexdigest(), n
+
+
+def _provenance_path(artifact: str) -> str:
+    return artifact + ".provenance.json"
+
+
+def _write_provenance(artifact: str, payload: dict) -> None:
+    path = _provenance_path(artifact)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(payload, f, sort_keys=True)
+    os.replace(tmp, path)
+
+
+def _read_provenance(artifact: str) -> dict | None:
+    try:
+        with open(_provenance_path(artifact), encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _wet_fingerprint(wet_dir: str) -> str:
+    """Content-sensitive fingerprint of the WET file set.
+
+    Hashes (basename, size, mtime_ns) instead of every byte: a WET corpus
+    is tens of GB at full scale, and mtime changes on any real replacement
+    or rewrite. This is change detection, not a cryptographic commitment.
+    """
+    entries = []
+    for path in wet_files(wet_dir):
+        st = os.stat(path)
+        entries.append([os.path.basename(path), st.st_size, st.st_mtime_ns])
+    blob = json.dumps(entries, separators=(",", ":")).encode()
+    return hashlib.sha256(blob).hexdigest()
 
 
 def _skip(path: str, force: bool) -> bool:
@@ -112,12 +175,45 @@ def stage_download(
     t0 = time.perf_counter()
     with open(urls_file) as f:
         urls = [line.strip() for line in f if line.strip()]
+    expected = {u.rsplit("/", 1)[-1] for u in urls}
     if not force and os.path.isdir(out_dir):
-        have = len(wet_files(out_dir))
-        if have >= len(urls):
+        # Provenance gate (finding C1): the old check was `have >= len(urls)`,
+        # so a directory holding files from a DIFFERENT crawl was reused
+        # whenever it had enough of them. Only an exact name-set match is
+        # the corpus this URLs file describes; prune foreign WET files so
+        # ingest cannot pick them up either.
+        present = {os.path.basename(p) for p in wet_files(out_dir)}
+        extras = present - expected
+        if extras:
+            print(
+                f"[download] removing {len(extras)} WET file(s) not in "
+                f"{urls_file}: {', '.join(sorted(extras)[:3])}"
+                + (" ..." if len(extras) > 3 else ""),
+                file=sys.stderr,
+                flush=True,
+            )
+            for path in wet_files(out_dir):
+                if os.path.basename(path) in extras:
+                    os.remove(path)
+            present -= extras
+        missing = expected - present
+        empty = {
+            os.path.basename(p) for p in wet_files(out_dir) if os.path.getsize(p) == 0
+        }
+        if not missing and not empty:
             if verbose:
-                print(f"[download] reusing {out_dir} ({have} files)", flush=True)
+                print(
+                    f"[download] reusing {out_dir} ({len(present)} files, "
+                    f"matches {urls_file})",
+                    flush=True,
+                )
             return out_dir
+        if verbose and (missing or empty):
+            print(
+                f"[download] {out_dir} does not match {urls_file} "
+                f"(missing={len(missing)}, empty={len(empty)}) — downloading",
+                flush=True,
+            )
     os.makedirs(out_dir, exist_ok=True)
     # download_wet takes a urls file; reuse the caller's file directly.
     dl_main(urls_file, out_dir, workers)
@@ -136,12 +232,30 @@ def stage_ingest(
     from exa_home.ingest import read_wet, write_docs_jsonl
 
     t0 = time.perf_counter()
-    if _skip(docs_path, force):
-        with open(docs_path, encoding="utf-8") as f:
-            n = sum(1 for _ in f)
-        if verbose:
-            print(f"[ingest] reusing {docs_path} ({n} docs)", flush=True)
-        return {"docs": n, "reused": True}
+    wet_fp = _wet_fingerprint(wet_dir)
+    if not force and os.path.exists(docs_path):
+        # Provenance gate (finding C3): docs.jsonl is reusable only when it
+        # was produced from THIS WET file set. The old existence-only check
+        # let a different crawl's docs (and everything downstream) be
+        # consumed silently.
+        recorded = _read_provenance(docs_path)
+        sha, n = _file_sha_and_lines(docs_path)
+        if (
+            recorded
+            and recorded.get("wet_fingerprint") == wet_fp
+            and recorded.get("docs_sha256") == sha
+            and recorded.get("docs") == n
+        ):
+            if verbose:
+                print(f"[ingest] reusing {docs_path} ({n} docs)", flush=True)
+            return {"docs": n, "reused": True}
+        print(
+            f"[ingest] {docs_path} was not built from the current WET set "
+            f"(recorded: {recorded and recorded.get('wet_fingerprint')}, "
+            f"now: {wet_fp}) — re-ingesting",
+            file=sys.stderr,
+            flush=True,
+        )
 
     def all_docs():
         files = wet_files(wet_dir)
@@ -156,7 +270,7 @@ def stage_ingest(
             yield from read_wet(p)
 
     tmp = docs_path + ".tmp"
-    stats = write_docs_jsonl(all_docs(), tmp)
+    stats = write_docs_jsonl(all_docs(), tmp, progress_every=progress_every)
     # URL-second dedup + subset exclusion (digest-first is in write_docs_jsonl).
     import re
 
@@ -189,6 +303,15 @@ def stage_ingest(
             if verbose and kept % 100_000 == 0:
                 print(f"[ingest] url-dedup: {kept}", flush=True)
     os.remove(tmp)
+    docs_sha, docs_lines = _file_sha_and_lines(docs_path)
+    _write_provenance(
+        docs_path,
+        {
+            "wet_fingerprint": wet_fp,
+            "docs_sha256": docs_sha,
+            "docs": docs_lines,
+        },
+    )
     _log(
         "ingest",
         t0,
@@ -335,10 +458,43 @@ def stage_queries(
     t0 = time.perf_counter()
     from scripts.jsonl import read_jsonl
 
-    if _skip(queries_path, force) and _skip(gt_path, force):
-        if verbose:
-            print(f"[queries] reusing {queries_path} + {gt_path}", flush=True)
-        return {"reused": True}
+    # Provenance gate (finding C2): q.jsonl/gt.jsonl are reusable only when
+    # they were built from these exact docs/vecs/ids at this nq. The old
+    # check was existence-only, so rebuilding the corpus kept the stale
+    # query set + ground truth and the gate scored a mismatched pair.
+    # Hashing the vectors is the expensive part (~5 GB at full scale); that
+    # is the price of a reuse decision that can actually detect a rebuild.
+    inputs = {
+        name: {"sha256": _sha256_file(path), "bytes": os.path.getsize(path)}
+        for name, path in (
+            ("docs", docs_path),
+            ("vecs", vecs_path),
+            ("ids", ids_path),
+        )
+    }
+    if not force and os.path.exists(queries_path) and os.path.exists(gt_path):
+        recorded = _read_provenance(queries_path)
+        q_sha = _sha256_file(queries_path)
+        gt_sha = _sha256_file(gt_path)
+        if (
+            recorded
+            and recorded.get("inputs") == inputs
+            and recorded.get("nq") == nq
+            and recorded.get("queries_sha256") == q_sha
+            and recorded.get("gt_sha256") == gt_sha
+        ):
+            if verbose:
+                print(
+                    f"[queries] reusing {queries_path} + {gt_path}",
+                    flush=True,
+                )
+            return {"reused": True}
+        print(
+            f"[queries] {queries_path}/{gt_path} do not match the current "
+            f"corpus (or predate provenance tracking) — regenerating",
+            file=sys.stderr,
+            flush=True,
+        )
     from scripts.ground_truth import ground_truth
 
     # Only the first `nq` docs are needed: read them and stop. The old code
@@ -353,6 +509,15 @@ def stage_queries(
     with open(queries_path, "w") as f:
         f.writelines(json.dumps({"query": d["text"][:200]}) + "\n" for d in docs)
     ground_truth(vecs_path, ids_path, gt_path, queries=queries_path, embedder=embedder)
+    _write_provenance(
+        queries_path,
+        {
+            "inputs": inputs,
+            "nq": nq,
+            "queries_sha256": _sha256_file(queries_path),
+            "gt_sha256": _sha256_file(gt_path),
+        },
+    )
     _log("queries", t0, f" ({nq} queries -> {queries_path}, {gt_path})")
     return {"nq": nq}
 
