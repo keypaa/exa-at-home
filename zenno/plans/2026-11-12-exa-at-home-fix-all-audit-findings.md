@@ -17,7 +17,9 @@
 - Every behavior change must be accompanied by a test (new or extended) that pins the fix.
 - After each task: run the relevant test subset + ruff check on touched files, then commit.
 - torch/sentence-transformers are NOT installed — real embedder/reranker paths cannot be executed; mark those tests appropriately and audit by reading + synth fakes.
+  **UPDATE (2026-11-12, later session):** this constraint is no longer true — PyPI/network access works, and `torch-2.15.0+cpu` + `sentence-transformers 6.0.1` are installed and importable (CPU only). Only the large HF weight downloads remain volume/time-bound, and the `cloud_only` suite still needs the box/GPU.
 - CPU only; no GPU; no network downloads.
+  **UPDATE (2026-11-12, later session):** network access is available (verified: pypi + download.pytorch.org). The original "no network" constraint was an audit-runner assumption, not a machine limit.
 
 ## Review Focus
 
