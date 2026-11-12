@@ -62,12 +62,15 @@ def home_search(
         raise ValueError("top_k must be in (0, 100]")
     from .orch import build_search_dag, run_search
 
+    # Retrieve at least `top_k` coarse candidates so a caller asking for
+    # top_k > top_coarse is not silently capped at top_coarse (finding P2-09).
+    top_coarse = max(OPERATING_POINT["top_coarse"], top_k)
     dag = build_search_dag(
         _deps["embedder"],
         _deps["ann"],
         _deps["reranker"],
         _deps["store"],
-        top_coarse=OPERATING_POINT["top_coarse"],
+        top_coarse=top_coarse,
         nprobe=OPERATING_POINT["nprobe"],
     )
     # Exact Task 10 arg order; filters=None means {}. Spec-shaped filters

@@ -147,9 +147,15 @@ def run_embed(
             state = None
         else:
             rows = int(state.get("rows", 0))
-            if rows % chunk != 0 or rows > n_docs:
+            if rows > n_docs:
                 raise ValueError(
-                    f"{state_path}: rows={rows} not on chunk boundary; run --force"
+                    f"{state_path}: rows={rows} > n_docs={n_docs}; run --force"
+                )
+            # A completed run ends with rows == n_docs even when n_docs is not
+            # a multiple of chunk; that is complete, not a reason to --force.
+            if rows % chunk != 0 and rows != n_docs:
+                raise ValueError(
+                    f"{state_path}: rows={rows} not on chunk boundary and not complete; run --force"
                 )
             # ids progress must match rows
             if os.path.exists(ids_part):
