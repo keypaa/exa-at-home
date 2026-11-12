@@ -17,7 +17,7 @@ def test_inline_json_overrides_with_presets(tmp_path):
     assert cfg["hardware_profile"] == "rtx-3090-classic"
     assert cfg["operating_point"]["batch_size"] == 7
     assert cfg["operating_point"]["top_coarse"] == 50
-    assert cfg["optiona"] is False if False else True
+    assert "optiona" not in cfg  # typo'd key must not leak into the config
 
 
 def test_tiny_profile_values(tmp_path):

@@ -409,5 +409,7 @@ def test_ann_index_rejects_absurd_strided_shape():
 
     # A small well-formed matrix still works.
     vecs = np.array([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32)
-    ids, _scores = AnnIndex(vecs, ["a", "b"]).search(np.array([1.0, 0.0], dtype=np.float32), top_k=2)
+    ids, _scores = AnnIndex(vecs, ["a", "b"]).search(
+        np.array([1.0, 0.0], dtype=np.float32), top_k=2
+    )
     assert ids == ["a", "b"]

@@ -190,7 +190,7 @@ def main(
         write_manifest,
     )
 
-    vecs = np.load(vecs_path)
+    vecs = np.load(vecs_path, mmap_mode="r")
     if vecs.ndim != 2 or vecs.shape[1] != DIM:
         raise ValueError(f"{vecs_path}: want n×{DIM} float32, got {vecs.shape}")
     vecs = vecs.astype(np.float32, copy=False)

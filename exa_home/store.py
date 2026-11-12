@@ -118,7 +118,18 @@ class ContentStore:
                 length = int(loc[2]) if len(loc) > 2 else None
             except (ValueError, TypeError):
                 continue
-            idx[str(doc_id)] = (os.path.join(self.root, shard), off, length)
+            # Contain the shard path under self.root: an attacker-controlled
+            # offsets.json must not be able to read files outside the store
+            # (absolute path or ".." traversal). See finding S2.
+            resolved = os.path.normpath(
+                os.path.join(os.path.normpath(self.root), shard)
+            )
+            root_norm = os.path.normpath(self.root)
+            if os.path.isabs(shard) or not (
+                resolved == root_norm or resolved.startswith(root_norm + os.sep)
+            ):
+                continue
+            idx[str(doc_id)] = (resolved, off, length)
         self._index = idx
         self._shard_sizes = self._sizes_from_index(idx)
         return True

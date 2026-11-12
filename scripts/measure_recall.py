@@ -31,6 +31,14 @@ def recall_at_10(gt_rows, pred_rows, on_skip=None) -> tuple[float | None, int]:
 
     Returns (recall, n_skipped); recall is None when nothing is comparable.
     """
+    seen_qids: set = set()
+    for r in pred_rows:
+        qid = r["query_id"]
+        if qid in seen_qids:
+            raise ValueError(
+                f"measure_recall: duplicate query_id {qid!r} in predictions"
+            )
+        seen_qids.add(qid)
     pr = {r["query_id"]: r["top10"] for r in pred_rows}
     recs: list[float] = []
     skipped = 0

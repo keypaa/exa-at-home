@@ -163,11 +163,17 @@ def main(argv: list[str] | None = None) -> int:
         r_hit = sum(hit(r["reranked_pos"]) for r in rows)
         c_mrr = sum(mrr(r["coarse_pos"]) for r in rows) / n
         r_mrr = sum(mrr(r["reranked_pos"]) for r in rows) / n
-        wins = sum(1 for r in rows if hit(r["reranked_pos"]) and not hit(r["coarse_pos"]))
-        losses = sum(1 for r in rows if hit(r["coarse_pos"]) and not hit(r["reranked_pos"]))
+        wins = sum(
+            1 for r in rows if hit(r["reranked_pos"]) and not hit(r["coarse_pos"])
+        )
+        losses = sum(
+            1 for r in rows if hit(r["coarse_pos"]) and not hit(r["reranked_pos"])
+        )
 
     print(f"\n=== E3 RESULT (n={n}) ===")
-    print(f"target recall@10   coarse={c_hit / n if n else 0.0:.3f}   reranked={r_hit / n if n else 0.0:.3f}")
+    print(
+        f"target recall@10   coarse={c_hit / n if n else 0.0:.3f}   reranked={r_hit / n if n else 0.0:.3f}"
+    )
     print(f"target MRR@10       coarse={c_mrr:.3f}   reranked={r_mrr:.3f}")
     print(f"paired: reranker wins {wins} / loses {losses} / ties {n - wins - losses}")
 

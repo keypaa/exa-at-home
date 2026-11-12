@@ -61,5 +61,5 @@ def test_synth_wet_roundtrip(tmp_path):
 
 @pytest.mark.cloud_only
 def test_scaffold_cloud_marker_placeholder():
-    """Proves the cloud_only marker is registered; never runs in local CI."""
-    assert True
+    """Placeholder: real scaffold test needs the box (model + index)."""
+    pytest.skip("requires the box (real embedder + index); never runs in local CI")
