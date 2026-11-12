@@ -59,6 +59,29 @@ class DAG:
                 if d not in self.nodes:
                     raise ValueError(f"DAG: node {n.name!r} depends on unknown {d!r}")
         self._order = self._topo_sort()
+        # One reusable one-shot executor for timed nodes. A timed-out node
+        # replaces it instead of leaking a new pool per timeout (finding S4).
+        self._pool: concurrent.futures.ThreadPoolExecutor | None = None
+
+    def _executor(self) -> concurrent.futures.ThreadPoolExecutor:
+        if self._pool is None:
+            self._pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        return self._pool
+
+    def close(self) -> None:
+        """Release the timed-node executor (idempotent)."""
+        # getattr: __init__ may have raised before _pool was assigned
+        # (e.g. the cycle-rejection path), and __del__ still runs.
+        pool = getattr(self, "_pool", None)
+        self._pool = None
+        if pool is not None:
+            try:
+                pool.shutdown(wait=False, cancel_futures=True)
+            except Exception:  # noqa: BLE001, S110 — teardown is best-effort
+                pass
+
+    def __del__(self):  # pragma: no cover — interpreter teardown
+        self.close()
 
     def _topo_sort(self) -> list[str]:
         indeg = {name: 0 for name in self.nodes}
@@ -102,15 +125,20 @@ class DAG:
                 if node.timeout_ms is None:
                     outputs[name] = node.fn(snap)
                 else:
-                    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+                    pool = self._executor()
                     try:
                         fut = pool.submit(node.fn, snap)
                         outputs[name] = fut.result(timeout=node.timeout_ms / 1000)
-                    finally:
-                        # wait=False: never join a node that may still be
-                        # running (that join is what blew the timeout
-                        # budget). cancel_futures: drop the queued work.
-                        pool.shutdown(wait=False, cancel_futures=True)
+                    except concurrent.futures.TimeoutError:
+                        # The worker may still be running. Replace the pool
+                        # (never join) so later queries cannot queue behind
+                        # it, and so timed-out calls do not leak one thread
+                        # per timeout (finding S4).
+                        self.close()
+                        raise
+                    except Exception:
+                        # A normal node failure leaves the pool healthy.
+                        raise
             except Exception as e:  # noqa: BLE001 — failure is data here
                 dt_ms = (time.perf_counter() - t0) * 1000
                 spans[name] = dt_ms

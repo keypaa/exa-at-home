@@ -92,6 +92,19 @@ class Reranker:
                 pass
             return None
 
+    def close(self) -> None:
+        """Release the one-shot scoring executor (idempotent)."""
+        pool = getattr(self, "_pool", None)
+        self._pool = None
+        if pool is not None:
+            try:
+                pool.shutdown(wait=False, cancel_futures=True)
+            except Exception:  # noqa: BLE001, S110 — teardown is best-effort
+                pass
+
+    def __del__(self):  # pragma: no cover — interpreter teardown
+        self.close()
+
     def rerank(self, query, candidates):
         if not candidates:
             return [], False
