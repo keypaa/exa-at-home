@@ -15,6 +15,7 @@ IN-PROCESS — no subprocess); `main(argv)` is the CLI wrapper around it.
 
 import argparse
 import json
+import sys
 
 import numpy as np
 
@@ -125,6 +126,13 @@ def main(argv: list[str] | None = None) -> int:
         "(aligns with pred.jsonl query order)",
     )
     a = ap.parse_args(argv)
+    if a.queries is None:
+        print(
+            "WARNING: --queries not given; using random corpus vectors as queries "
+            f"(--nq={a.nq}). Recall against text-query predictions scores ~0.0000 "
+            "by construction — see ground_truth.py docstring.",
+            file=sys.stderr,
+        )
     ground_truth(a.vecs, a.ids, a.out, nq=a.nq, seed=a.seed, queries=a.queries)
     return 0
 

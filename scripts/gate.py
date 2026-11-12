@@ -182,7 +182,10 @@ def gate_real(
     g3_pass = p50 is not None and p50 <= budget_ms
 
     # --- G1 ANN fidelity ---
-    g1 = {}
+    g1 = {
+        "skipped": not bool(pred),
+        "skip_reason": "no --pred provided" if not pred else None,
+    }
     if pred:
         from scripts.measure_recall import recall_at_10
 
@@ -203,7 +206,12 @@ def gate_real(
     g1.setdefault("baseline_coarse_limit", 0.4015 - G1_DROP_BUDGET)
 
     # --- G2 answer coverage ---
-    g2 = {}
+    g2 = {
+        "skipped": not (os.path.exists(e3_result_path or "") or run_g2_e3),
+        "skip_reason": "no --e3-result / not --run-g2-e3"
+        if not (os.path.exists(e3_result_path or "") or run_g2_e3)
+        else None,
+    }
     if os.path.exists(e3_result_path or ""):
         r = json.loads(Path(e3_result_path).read_text())
         coarse = r.get("coarse_recall10")
@@ -250,6 +258,9 @@ def gate_real(
         },
         "G4_relevance_advisory": g4,
         "hard_gates_pass": overall_pass,
+        "skipped_gates": [
+            name for name, g in (("G1", g1), ("G2", g2)) if g.get("skipped")
+        ],
         "n_queries": len(totals),
     }
 
