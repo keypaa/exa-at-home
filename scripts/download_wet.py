@@ -10,6 +10,7 @@ already match the remote Content-Length. 16 workers by default.
 """
 
 import argparse
+import gzip
 import os
 import time
 import urllib.request
@@ -19,6 +20,23 @@ from exa_home.config import DOWNLOAD_WORKERS
 
 RETRIES = 5
 BACKOFF_S = 2.0
+
+
+def verify_wet_gzip(path: str) -> None:
+    """Raise OSError unless `path` is a complete, CRC-valid gzip stream.
+
+    Content-Length only proves the number of bytes, not their integrity: a
+    corrupt body of the right size used to be accepted and then skipped as
+    "already complete" forever (finding C9). Reading the stream to EOF
+    validates the gzip CRC32/ISIZE trailer, which is the checksum Common
+    Crawl ships for WET files.
+    """
+    try:
+        with gzip.open(path, "rb") as f:
+            while f.read(1 << 20):
+                pass
+    except (OSError, EOFError) as e:
+        raise OSError(f"{path}: gzip verification failed: {e}") from e
 
 
 def _remote_size(url: str) -> int | None:
@@ -55,6 +73,7 @@ def fetch_one(url: str, out_dir: str) -> tuple[str, int]:
     """
     name = url.rsplit("/", 1)[-1]
     path = os.path.join(out_dir, name)
+    is_gzip = name.endswith(".gz")
     total = _remote_size(url)
     if total is not None and total > 0:
         have = os.path.getsize(path) if os.path.exists(path) else 0
@@ -64,7 +83,16 @@ def fetch_one(url: str, out_dir: str) -> tuple[str, int]:
             # Restart from scratch instead of "already complete: skip".
             _truncate(path, 0)
         elif have >= total:
-            return path, have  # already complete: skip
+            # Right size is not enough (finding C9): verify the gzip
+            # checksum before declaring the file complete, or a corrupt
+            # body would be skipped forever.
+            if not is_gzip:
+                return path, have  # already complete: skip
+            try:
+                verify_wet_gzip(path)
+                return path, have  # already complete AND verified: skip
+            except OSError:
+                _truncate(path, 0)
     last: Exception | None = None
     for attempt in range(RETRIES):
         try:
@@ -92,6 +120,13 @@ def fetch_one(url: str, out_dir: str) -> tuple[str, int]:
                         if not chunk:
                             break
                         f.write(chunk)
+            if is_gzip:
+                try:
+                    verify_wet_gzip(path)
+                except OSError:
+                    # Never keep a corrupt file for the next run to skip.
+                    _truncate(path, 0)
+                    raise
             return path, os.path.getsize(path)
         except Exception as e:  # noqa: BLE001 — transient 403s/resets; retried then raised as OSError
             # (narrowing would drop an unknown transient class and fail the batch)

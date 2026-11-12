@@ -15,6 +15,7 @@ stream). The function still returned normally, and the next run saw
 permanent and silently ingested.
 """
 
+import gzip
 from pathlib import Path
 
 import pytest
@@ -105,7 +106,7 @@ def test_retry_after_partial_failure_does_not_duplicate_prefix(
     the loop (`bytes=200-`), so the server resent bytes 200.. and the
     "ab" append DUPLICATED them: 1100 bytes of corrupt gzip stream.
     """
-    payload = bytes(range(256)) * 4  # 1024 bytes
+    payload = gzip.compress(bytes(range(256)) * 4, mtime=0)
     f = tmp_path / "x.wet.gz"
     f.write_bytes(payload[:200])  # partial file from an earlier run
 
@@ -116,14 +117,17 @@ def test_retry_after_partial_failure_does_not_duplicate_prefix(
 
     assert size == len(payload)
     assert Path(path).read_bytes() == payload
-    assert ranges == ["bytes=200-", "bytes=300-"]
+    # Attempt 1 resumed at 200 and died after 100 more bytes (or at EOF,
+    # whichever came first); attempt 2 must resume from what is on disk.
+    after_failure = 200 + min(100, len(payload) - 200)
+    assert ranges == ["bytes=200-", f"bytes={after_failure}-"]
 
 
 def test_resume_after_a_failed_first_attempt_uses_the_disk_size(
     tmp_path, monkeypatch, dw
 ):
     """Nothing on disk yet: attempt 1 dies mid-transfer, attempt 2 resumes."""
-    payload = bytes(range(256)) * 4  # 1024 bytes
+    payload = gzip.compress(bytes(range(256)) * 4, mtime=0)
     ranges: list = []
     _install(monkeypatch, dw, payload, ranges, fail_first_after=200)
 
@@ -138,7 +142,7 @@ def test_resumed_download_is_byte_identical_to_a_fresh_download(
     tmp_path, monkeypatch, dw
 ):
     """Same bytes, whether the file was downloaded in one go or resumed."""
-    payload = bytes(range(256)) * 4  # 1024 bytes
+    payload = gzip.compress(bytes(range(256)) * 4, mtime=0)
 
     resumed_ranges: list = []
     _install(monkeypatch, dw, payload, resumed_ranges, fail_first_after=100)
@@ -163,7 +167,7 @@ def test_oversized_local_file_is_restarted_not_skipped(tmp_path, monkeypatch, dw
     That is exactly the state the old bug left behind (duplicated prefix):
     the old code saw `have >= total` and skipped the file forever.
     """
-    payload = b"payload-bytes" * 100  # 1200 bytes
+    payload = gzip.compress(b"payload-bytes" * 100, mtime=0)
     stale = b"stale-prefix" + payload  # 1212 bytes > remote size
     f = tmp_path / "x.wet.gz"
     f.write_bytes(stale)
@@ -177,9 +181,32 @@ def test_oversized_local_file_is_restarted_not_skipped(tmp_path, monkeypatch, dw
     assert ranges == [None]  # restarted from scratch, no bogus Range
 
 
+def test_corrupt_gzip_of_right_size_is_rejected(tmp_path, monkeypatch, dw):
+    """Content-Length matches but the gzip CRC does not: reject, don't skip.
+
+    The old code treated `have >= total` as "complete" and returned, so a
+    corrupt body of the right size was accepted forever (finding C9).
+    """
+    good = gzip.compress(b"payload-bytes" * 100, mtime=0)
+    corrupt = bytearray(good)
+    corrupt[len(corrupt) // 2] ^= 0xFF  # same length, broken CRC
+    corrupt = bytes(corrupt)
+    assert len(corrupt) == len(good)
+    f = tmp_path / "x.wet.gz"
+    f.write_bytes(corrupt)
+
+    ranges: list = []
+    _install(monkeypatch, dw, corrupt, ranges, total=len(corrupt))
+
+    with pytest.raises(OSError, match="gzip verification failed"):
+        dw.fetch_one("https://example.com/x.wet.gz", str(tmp_path))
+    # The corrupt bytes were not left behind for the next run to skip.
+    assert f.stat().st_size == 0
+
+
 def test_complete_file_is_skipped_without_a_request(tmp_path, monkeypatch, dw):
     """Already-complete files are still skipped (no network round-trip)."""
-    payload = b"payload-bytes" * 10
+    payload = gzip.compress(b"payload-bytes" * 10, mtime=0)
     f = tmp_path / "x.wet.gz"
     f.write_bytes(payload)
 
