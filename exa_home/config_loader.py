@@ -64,6 +64,85 @@ def _load_raw(path):
     return json.loads(text)
 
 
+# Strict schema: a typo'd key used to be copied through silently and the
+# knob it was meant to set kept its default (finding P2-06). Unknown keys
+# now fail loudly at load time instead of shipping a differently-configured
+# server than the operator wrote down.
+_TOP_LEVEL_KEYS = {
+    "hardware",
+    "models",
+    "ingest",
+    "serving",
+    "embedding",
+    "resilience",
+    "operating_point",
+    "hardware_profile",
+}
+_SECTION_KEYS = {
+    "hardware": {"name", "usable_vram_gb", "usable_ram_gb", "n_cpu"},
+    "models": {"embedder", "reranker", "dimensions"},
+    "ingest": {"wet_files", "wet_target_count"},
+    "serving": {
+        "nprobe",
+        "top_coarse",
+        "max_pair_tokens",
+        "batch_size",
+        "max_query_tokens",
+        "budget_ms",
+        "k",
+    },
+    "embedding": {"max_seq_length"},
+    "resilience": {"resume", "chunk_size", "embed_batch"},
+}
+
+
+def _reject_unknown(where: str, got, allowed: set[str]) -> None:
+    if got is None:
+        return
+    if not isinstance(got, dict):
+        raise ValueError(f"{where} must be an object")  # noqa: TRY004
+    unknown = sorted(set(got) - allowed)
+    if unknown:
+        raise ValueError(
+            f"unknown config key(s) in {where}: {', '.join(unknown)} "
+            f"(known: {', '.join(sorted(allowed))})"
+        )
+
+
+def _validate(raw: dict) -> None:
+    unknown = sorted(set(raw) - _TOP_LEVEL_KEYS)
+    if unknown:
+        raise ValueError(
+            f"unknown config key(s): {', '.join(unknown)} "
+            f"(known: {', '.join(sorted(_TOP_LEVEL_KEYS))})"
+        )
+    for section, allowed in _SECTION_KEYS.items():
+        _reject_unknown(section, raw.get(section), allowed)
+    # `operating_point` is the serving override dict consumed by the MCP
+    # server; it must use the same keys as `serving`.
+    _reject_unknown(
+        "operating_point", raw.get("operating_point"), _SECTION_KEYS["serving"]
+    )
+    hp = raw.get("hardware_profile")
+    if hp is not None and not isinstance(hp, str):
+        raise ValueError("hardware_profile must be a string")
+    hw = raw.get("hardware")
+    if isinstance(hw, dict):
+        # dataclasses do not type-check at construction; without this a
+        # string vram value only explodes later inside HardwareProfile.tier.
+        if "name" in hw and not isinstance(hw["name"], str):
+            raise ValueError("hardware.name must be a string")
+        for key in ("usable_vram_gb", "usable_ram_gb"):
+            if key in hw and (
+                isinstance(hw[key], bool) or not isinstance(hw[key], (int, float))
+            ):
+                raise ValueError(f"hardware.{key} must be a number")
+        if "n_cpu" in hw and (
+            isinstance(hw["n_cpu"], bool) or not isinstance(hw["n_cpu"], int)
+        ):
+            raise ValueError("hardware.n_cpu must be an integer")
+
+
 def normalize(raw, fallback=None):
     from . import config as C
 
@@ -71,13 +150,19 @@ def normalize(raw, fallback=None):
         fallback = HardwareProfile()
     if not isinstance(raw, dict):
         raise ValueError("config must be an object")  # noqa: TRY004
+    _validate(raw)
     out = {"hardware": asdict(fallback)}
     out.update({k: v for k, v in raw.items() if k != "hardware"})
     if "hardware" in raw and isinstance(raw["hardware"], dict):
         hw = dict(asdict(fallback))
         hw.update(raw["hardware"])
         out["hardware"] = hw
-    prof = HardwareProfile(**out["hardware"])
+    try:
+        prof = HardwareProfile(**out["hardware"])
+    except TypeError as e:
+        # Previously swallowed into the default profile: the operator's
+        # hardware block silently did nothing (finding P2-06).
+        raise ValueError(f"invalid hardware config: {e}") from e
 
     out.setdefault(
         "models",
@@ -133,7 +218,17 @@ def normalize(raw, fallback=None):
         if key in ur:
             out["resilience"][key] = ur[key]
     op = dict(out["serving"])
-    out.setdefault("operating_point", op)
+    raw_op = raw.get("operating_point")
+    if raw_op is not None:
+        # A key given in both places must agree; otherwise the server and
+        # the pipeline would run different operating points.
+        conflicts = sorted(k for k, v in raw_op.items() if k in op and op[k] != v)
+        if conflicts:
+            raise ValueError(
+                "operating_point conflicts with serving for: " + ", ".join(conflicts)
+            )
+        op.update(raw_op)
+    out["operating_point"] = op
     out.setdefault(
         "hardware_profile", prof.tier if prof.name not in ("tiny",) else prof.name
     )
@@ -155,10 +250,12 @@ def load(path):
         raise ValueError("config must be JSON/YAML object")  # noqa: TRY004
     fallback = HardwareProfile()
     if isinstance(raw.get("hardware"), dict) and raw["hardware"].get("name"):
+        # No silent fallback: a bad hardware block used to be discarded
+        # while the rest of the config was accepted (finding P2-06).
         try:
             fallback = HardwareProfile(**raw["hardware"])
-        except TypeError:
-            fallback = HardwareProfile()
+        except TypeError as e:
+            raise ValueError(f"invalid hardware config: {e}") from e
     return normalize(raw, fallback=fallback)
 
 
