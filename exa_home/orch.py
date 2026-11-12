@@ -193,6 +193,7 @@ def _month_range(value: object) -> tuple[str, str]:
 def translate_filters(filters: dict) -> dict:
     """Map the spec-shaped filter dict to IvfIndex.search kwargs."""
     out: dict = {}
+    MAX_LIST = 1000  # cap per-filter-list size to bound the Rust-side work
     for k, v in (filters or {}).items():
         rust_key = SPEC_TO_RUST_FILTERS.get(k, k)
         if rust_key not in RUST_FILTER_KEYS:
@@ -203,6 +204,20 @@ def translate_filters(filters: dict) -> dict:
             )
         if rust_key == "month_range":
             v = _month_range(v)
+        elif rust_key in ("domains", "terms"):
+            if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
+                raise ValueError(f"filter {rust_key} must be a list of strings")
+            if len(v) > MAX_LIST:
+                raise ValueError(
+                    f"filter {rust_key} has {len(v)} entries (> {MAX_LIST} cap)"
+                )
+        elif rust_key == "allow":
+            if not isinstance(v, list) or not all(isinstance(x, int) for x in v):
+                raise ValueError("filter allow must be a list of row ids (ints)")
+            if len(v) > MAX_LIST:
+                raise ValueError(
+                    f"filter allow has {len(v)} entries (> {MAX_LIST} cap)"
+                )
         out[rust_key] = v
     return out
 

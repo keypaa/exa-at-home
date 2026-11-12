@@ -104,8 +104,8 @@ def home_contents(ids: list[str], max_chars_per_doc: int = 8000) -> dict:
         raise ValueError(
             f"ids must be <= {MAX_IDS_PER_CONTENTS_CALL} per call (got {len(ids)})"
         )
-    if max_chars_per_doc <= 0 or max_chars_per_doc > 200_000:
-        raise ValueError("max_chars_per_doc must be in (0, 200000]")
+    if max_chars_per_doc <= 0 or max_chars_per_doc > 20_000:
+        raise ValueError("max_chars_per_doc must be in (0, 20000]")
     if not ids:
         raise ValueError("ids must be non-empty")
     page, rest = ids[:20], ids[20:]

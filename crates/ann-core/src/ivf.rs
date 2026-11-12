@@ -68,8 +68,14 @@ pub fn search_lists(
             scored.push((row, s));
         }
     }
+    // Keep only the top `n_coarse` via a bounded selection instead of sorting
+    // every scanned candidate (finding R4): O(scanned) + O(n_coarse log
+    // n_coarse) instead of O(scanned log scanned).
+    if scored.len() > n_coarse {
+        scored.select_nth_unstable_by(n_coarse, |a, b| crate::cmp_desc(a.1, b.1));
+        scored.truncate(n_coarse);
+    }
     scored.sort_by(|a, b| crate::cmp_desc(a.1, b.1));
-    scored.truncate(n_coarse);
     scored
 }
 
