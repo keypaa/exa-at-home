@@ -114,12 +114,9 @@ impl AnnIndex {
         // report an absurd ncols, and `nrows * ncols` can overflow or
         // request enough RAM to abort the process. Return a clean error
         // instead of panicking (finding R1/R2).
-        let n_elements = a
-            .nrows()
-            .checked_mul(a.ncols())
-            .ok_or_else(|| {
-                PyValueError::new_err("AnnIndex::new: matrix shape overflow (nrows * ncols)")
-            })?;
+        let n_elements = a.nrows().checked_mul(a.ncols()).ok_or_else(|| {
+            PyValueError::new_err("AnnIndex::new: matrix shape overflow (nrows * ncols)")
+        })?;
         if n_elements > MAX_MATRIX_ELEMENTS {
             return Err(PyValueError::new_err(format!(
                 "AnnIndex::new: matrix has {n_elements} elements (> {MAX_MATRIX_ELEMENTS} cap)"
