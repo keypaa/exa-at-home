@@ -103,6 +103,44 @@ class ContentStore:
             if name.startswith("shard-") and name.endswith(".jsonl")
         ]
 
+    def reset(self) -> int:
+        """Drop this store's own records so it can be rebuilt from scratch.
+
+        The store holds DERIVED corpus content: a rebuild of the index
+        rewrites every record from the current docs, so keeping the previous
+        corpus's shards only grows the directory forever (disk hygiene) —
+        and the store is deliberately NOT covered by the manifest, so
+        nothing else detects that drift. Returns the number of files
+        removed.
+
+        Safety: only files this store created are deleted — `shard-*.jsonl`
+        and `offsets.json` sitting directly under `root`. Anything else in
+        the directory (user files, nested dirs) is left untouched, and the
+        in-memory state is invalidated so no read can serve a record whose
+        bytes are about to disappear.
+        """
+        removed = 0
+        with self._lock:
+            self._close_bulk()
+            self._index = None
+            self._shard_sizes = {}
+            self._shard_locks = {}
+            self._lru.clear()
+            self._lru_used = 0
+            if not os.path.isdir(self.root):
+                return 0
+            root = os.path.normpath(self.root)
+            for name in sorted(os.listdir(self.root)):
+                path = os.path.join(self.root, name)
+                mine = os.path.normpath(os.path.dirname(path)) == root and (
+                    (name.startswith("shard-") and name.endswith(".jsonl"))
+                    or name == OFFSETS_FILENAME
+                )
+                if mine and os.path.isfile(path):
+                    os.remove(path)
+                    removed += 1
+        return removed
+
     def put(self, doc: dict) -> None:
         path = self._shard(doc["id"])
         payload = (json.dumps(doc) + "\n").encode("utf-8")

@@ -40,6 +40,12 @@
 - `run_e3` (C10) validates `--docs` against the index's recorded source
   (sha256, size for legacy indexes) and fingerprints the target filename by
   corpus hash; `infer_docs_path` prefers corpus-named docs over the root file.
+- Index rebuilds no longer accumulate content store (disk hygiene):
+  `build_index` prunes the derived store (`ContentStore.reset()`, shards +
+  `offsets.json` only — foreign files untouched) before repopulating it, and
+  `--no-store` prunes a stale store dir left by a previous build so a dir can
+  never outlive the index it belongs to. `--no-reset-store` keeps the
+  append/merge semantics as an explicit opt-out.
 
 ### Security
 - `index/manifest.json` is documented (and hooked via
@@ -108,6 +114,10 @@
 ### Tests
 - New regression test: `AnnIndex` rejects absurd strided shapes (no SIGABRT).
 - Removed tautological assertions in `test_config_loader.py` / `test_scaffold.py`.
+- `ContentStore.reset()` prunes only the store's own files (foreign files and
+  nested dirs survive); index rebuilds leave a store identical in size to a
+  fresh build of the same corpus; `--no-store` removes a stale store dir;
+  `--no-reset-store` keeps append semantics.
 
 ## [0.9.0] - 2026-10-13
 

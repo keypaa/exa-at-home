@@ -288,3 +288,35 @@ def test_store_bulk_keeps_handles_open_until_save(tmp_path):
     assert s._bulk_handles is None
     fresh = ContentStore(str(tmp_path))
     assert fresh.get("c")["id"] == "c"
+
+
+def test_store_reset_prunes_only_its_own_files(tmp_path):
+    """reset() drops THIS store's shards + offsets so a rebuild cannot grow
+    the dir by a full corpus per rebuild — and touches nothing else."""
+    root = str(tmp_path)
+    s = ContentStore(root)
+    s.begin_bulk()
+    s.put(_doc("a", "first corpus body"))
+    s.save_index()
+    assert s._shard_paths()
+
+    # Files this store did not write must survive a reset.
+    (tmp_path / "notes.txt").write_text("keep me")
+    (tmp_path / "nested").mkdir()
+    (tmp_path / "nested" / "shard-0.jsonl").write_text("not mine")
+
+    fresh = ContentStore(root)
+    removed = fresh.reset()
+    assert removed == 2, f"expected shard + offsets removed, got {removed}"
+    assert (tmp_path / "notes.txt").is_file()
+    assert (tmp_path / "nested" / "shard-0.jsonl").is_file()
+    assert not fresh._shard_paths()
+
+    # A fresh bulk load starts from a clean slate: old ids are gone.
+    fresh.begin_bulk()
+    fresh.put(_doc("b", "second corpus body"))
+    fresh.save_index()
+    assert fresh.get("b")["text"] == "second corpus body"
+    assert fresh.get("a") is None
+    # reset() on an empty/absent store is a no-op, not an error.
+    assert ContentStore(str(tmp_path / "missing")).reset() == 0

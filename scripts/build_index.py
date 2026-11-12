@@ -181,6 +181,7 @@ def main(
     verbose: bool = False,
     source: dict | None = None,
     progress_every: int = 100_000,
+    reset_store: bool = True,
 ) -> dict:
     import numpy as np
 
@@ -224,12 +225,33 @@ def main(
         json.dump(ids, f)
 
     n_stored = 0
-    if not no_store:
-        from exa_home.store import ContentStore
+    from exa_home.store import ContentStore
+
+    if no_store:
+        # A store dir left by an earlier build would serve the PREVIOUS
+        # corpus' text for ids this index no longer has, and nothing would
+        # notice (the store is off-manifest by design). Prune the derived
+        # default location so the dir cannot outlive its index.
+        stale_store = os.path.join(out, "store")
+        if store is None and os.path.isdir(stale_store):
+            pruned = ContentStore(stale_store).reset()
+            if verbose and pruned:
+                print(f"[store] pruned {pruned} stale file(s)", flush=True)
+    else:
         from scripts.jsonl import read_jsonl
 
         store_dir = store or os.path.join(out, "store")
         cs = ContentStore(store_dir)
+        if reset_store:
+            # Derived data, rebuilt wholesale: appending to the previous
+            # corpus' shards would grow the dir by a full corpus per
+            # rebuild (disk hygiene; correctness is unaffected either way).
+            pruned = cs.reset()
+            if verbose and pruned:
+                print(
+                    f"[store] pruned {pruned} previous corpus file(s)",
+                    flush=True,
+                )
         # Track offsets during the bulk write so no rescan is needed:
         # save_index() persists store/offsets.json for O(1) cold gets.
         cs.begin_bulk()
@@ -283,6 +305,15 @@ if __name__ == "__main__":
     )
     ap.add_argument("--no-store", action="store_true")
     ap.add_argument(
+        "--no-reset-store",
+        dest="reset_store",
+        action="store_false",
+        help=(
+            "append to an existing content store instead of rebuilding it "
+            "(the store is derived data; rebuild is the default)"
+        ),
+    )
+    ap.add_argument(
         "--filter",
         action="store_true",
         help="also build index/filter/ (needs pyroaring)",
@@ -309,4 +340,5 @@ if __name__ == "__main__":
         a.crawl,
         verbose=a.verbose,
         progress_every=max(1, a.progress_every),
+        reset_store=a.reset_store,
     )

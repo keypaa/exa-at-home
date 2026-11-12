@@ -257,6 +257,153 @@ def test_toy_and_full_pipelines_do_not_share_an_index_dir(monkeypatch):
     assert seen_queries == ["q.jsonl", "q_20wet.jsonl"]
 
 
+def _write_inputs_for(tmp_path, tag, n, k, seed):
+    """Second corpus written to its OWN paths (different ids/text)."""
+    vecs = make_vectors(n, 256, seed=seed)
+    docs = [
+        {
+            "id": f"{tag}-{i}",
+            "url": f"https://example.com/{tag}/{i}",
+            "title": "",
+            "text": f"{tag} corpus document {i} " * 12,
+            "date": "2026-01-01",
+        }
+        for i in range(n)
+    ]
+    ids = [d["id"] for d in docs]
+    rng = np.random.default_rng(seed)
+    centroids = vecs[rng.choice(n, size=k, replace=False)]
+    vpath, ipath, cpath, dpath = (
+        tmp_path / f"vecs_{tag}.npy",
+        tmp_path / f"ids_{tag}.json",
+        tmp_path / f"centroids_{tag}.npy",
+        tmp_path / f"docs_{tag}.jsonl",
+    )
+    np.save(vpath, vecs)
+    ipath.write_text(json.dumps(ids))
+    np.save(cpath, centroids)
+    dpath.write_text("\n".join(json.dumps(d) for d in docs) + "\n")
+    return vpath, ipath, cpath, dpath
+
+
+def _store_shard_text(store_dir) -> str:
+    return "\n".join(p.read_text() for p in sorted(store_dir.glob("shard-*.jsonl")))
+
+
+def test_build_index_rebuild_prunes_previous_corpus_store(tmp_path):
+    """Rebuilding into the same out dir must REBUILD the derived store.
+
+    The old code appended to the existing shards, so each rebuild grew the
+    dir by a full corpus (and served two corpora' ids from one store).
+    Correctness is unchanged, disk is not: this pins the pruning.
+    """
+    import json as _json
+
+    from exa_home.store import OFFSETS_FILENAME
+    from scripts.build_index import main as build
+
+    n, k = 12, 4
+    out = tmp_path / "index"
+
+    _vecs, _ids, _docs, _cent, vpath, ipath, cpath, dpath = _write_inputs(
+        tmp_path, n, k
+    )
+    build(str(vpath), str(ipath), str(cpath), str(dpath), str(out))
+    store_a = out / "store"
+    offsets_a = _json.loads((store_a / OFFSETS_FILENAME).read_text())
+    bytes_a = sum(p.stat().st_size for p in store_a.glob("shard-*.jsonl"))
+    assert len(offsets_a) == n and bytes_a > 0
+
+    # Rebuild a DIFFERENT corpus into the same out dir.
+    v2, i2, c2, d2 = _write_inputs_for(tmp_path, "beta", n, k, seed=99)
+    stats = build(str(v2), str(i2), str(c2), str(d2), str(out))
+    assert stats["n_stored"] == n
+    assert stats["n_docs"] == n
+
+    # Reference: the same rebuild into a fresh dir. The pruned rebuild must
+    # match it byte-for-byte (no accumulation of the old corpus).
+    out_fresh = tmp_path / "index_fresh"
+    build(str(v2), str(i2), str(c2), str(d2), str(out_fresh))
+
+    offsets_b = _json.loads((store_a / OFFSETS_FILENAME).read_text())
+    shard_text = _store_shard_text(store_a)
+
+    # Only the second corpus is on disk...
+    assert set(offsets_b) == {f"beta-{i}" for i in range(n)}
+    assert '"id": "beta-0"' in shard_text
+    assert '"id": "d0"' not in shard_text
+    # ... and the store is exactly as big as a fresh build of the same
+    # corpus: nothing from the previous corpus survived.
+    bytes_rebuilt = sum(p.stat().st_size for p in store_a.glob("shard-*.jsonl"))
+    bytes_fresh = sum(
+        p.stat().st_size for p in (out_fresh / "store").glob("shard-*.jsonl")
+    )
+    assert bytes_rebuilt == bytes_fresh, (
+        f"store grew beyond a fresh rebuild: {bytes_rebuilt} vs {bytes_fresh}"
+    )
+
+    from exa_home.index_format import verify_manifest
+
+    verify_manifest(str(out))  # the rest of the index is still consistent
+
+
+def test_build_index_no_store_prunes_stale_store(tmp_path):
+    """--no-store must not leave the previous corpus' store behind: the
+    index would no longer match the text it serves (off-manifest)."""
+
+    from exa_home.store import OFFSETS_FILENAME
+    from scripts.build_index import main as build
+
+    n, k = 8, 4
+    out = tmp_path / "index"
+    _vecs, _ids, _docs, _cent, vpath, ipath, cpath, dpath = _write_inputs(
+        tmp_path, n, k
+    )
+    build(str(vpath), str(ipath), str(cpath), str(dpath), str(out))
+    assert (out / "store" / OFFSETS_FILENAME).is_file()
+
+    stats = build(
+        str(vpath),
+        str(ipath),
+        str(cpath),
+        str(dpath),
+        str(out),
+        no_store=True,
+    )
+    assert stats["n_stored"] == 0
+    assert not (out / "store" / OFFSETS_FILENAME).exists()
+    assert not list((out / "store").glob("shard-*.jsonl"))
+
+
+def test_build_index_keep_store_flag_appends(tmp_path):
+    """--no-reset-store keeps the opt-in append semantics (escape hatch)."""
+    import json as _json
+
+    from exa_home.store import OFFSETS_FILENAME
+    from scripts.build_index import main as build
+
+    n, k = 8, 4
+    out = tmp_path / "index"
+    _vecs, _ids, _docs, _cent, vpath, ipath, cpath, dpath = _write_inputs(
+        tmp_path, n, k
+    )
+    build(str(vpath), str(ipath), str(cpath), str(dpath), str(out))
+    before = sum(p.stat().st_size for p in (out / "store").glob("shard-*.jsonl"))
+
+    build(
+        str(vpath),
+        str(ipath),
+        str(cpath),
+        str(dpath),
+        str(out),
+        reset_store=False,
+    )
+    after = sum(p.stat().st_size for p in (out / "store").glob("shard-*.jsonl"))
+    assert after > before, "append semantics kept the old data (no pruning)"
+    offsets = _json.loads((out / "store" / OFFSETS_FILENAME).read_text())
+    assert len(offsets) == n  # ids are content digests: no duplicate entries
+
+
 def test_build_index_filter_build_streams_documents(tmp_path, monkeypatch):
     """The filter builder gets a LAZY view of the corpus, not a list.
 
