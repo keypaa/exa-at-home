@@ -53,29 +53,47 @@ def test_home_search_rejects_empty_query():
         home_search("   ")
 
 
+def _filterable_docs(n: int = 3) -> dict:
+    """Docs that satisfy the domain/term/date filters used below."""
+    return {
+        f"d{i}": {
+            "id": f"d{i}",
+            "url": f"https://example.com/{i}",
+            "title": f"Title {i}",
+            "text": "alpha neural search passage " * 5,
+            "date": "2026-05-01",
+        }
+        for i in range(n)
+    }
+
+
 def test_home_search_forwards_rust_shape_filters():
     # Rust IvfIndex.search shapes: month_range is a tuple, allow is
-    # Vec<u32>-equivalent (list[int] row ids). The FakeANN mirrors that.
-    ann = wire_mcp()
+    # Vec<u32>-equivalent (list[int] row ids). The FakeANN mirrors that
+    # (and now really evaluates them: domains OR / terms AND / month
+    # range / allow row ids).
+    ann = wire_mcp(3, docs=_filterable_docs())
     filters = {
         "terms": ["alpha"],
         "domains": ["example.com"],
         "month_range": ("2026-01", "2026-08"),
         "allow": [0],
     }
-    res = home_search("q", filters=filters)
+    res = home_search("alpha", filters=filters)
     assert ann.seen_kwargs and ann.seen_kwargs[0] == filters
     assert res["results"]
+    # allow is a row whitelist: only row 0 may come back.
+    assert [r["id"] for r in res["results"]] == ["d0"]
 
 
 def test_home_search_translates_spec_shape_filters():
     # Spec §7 shape {date_range, keywords} maps through orch's translation
     # layer to Rust kwargs {month_range, terms} before ann.search.
-    ann = wire_mcp()
+    ann = wire_mcp(3, docs=_filterable_docs())
     res = home_search(
-        "q",
+        "alpha",
         filters={
-            "date_range": ("2026-01", "2026-08"),
+            "date_range": ("2026-01-01", "2026-08-20"),
             "keywords": ["alpha"],
             "domains": ["example.com"],
         },
@@ -86,6 +104,7 @@ def test_home_search_translates_spec_shape_filters():
         "domains": ["example.com"],
     }
     assert res["results"]
+    assert {r["id"] for r in res["results"]} == {"d0", "d1", "d2"}
 
 
 def test_home_search_rejects_unknown_filter_keys():

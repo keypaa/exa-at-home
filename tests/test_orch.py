@@ -69,19 +69,29 @@ def test_search_waterfall_sums_to_wall():
         abs(sum(res["profile"][k] for k in stage_keys) - res["profile"]["total_ms"])
         < res["profile"]["total_ms"] * 0.2 + 5
     )
-    assert [r["id"] for r in res["results"]] == ["d0", "d1", "d2"]
+    # Ranked by real similarity (coarse scores), not by the fake's old
+    # fixed positional order — the ranking contract is the point here.
+    scores = [r["score"] for r in res["results"]]
+    assert scores == sorted(scores, reverse=True)
+    assert {r["id"] for r in res["results"]} == {"d0", "d1", "d2"}
     assert res["degraded"] is False
     assert all("score" in r and "snippet" in r for r in res["results"])
     assert all(len(r["snippet"]) <= 300 for r in res["results"])
 
 
 def test_filters_pass_straight_through_to_ann():
-    ann = FakeANN()
-    dag = build_search_dag(FakeEmbedder(), ann, FakeReranker(), FakeStore(make_docs()))
+    docs = make_docs(3)
+    for d in docs.values():
+        d["text"] = "alpha and beta passages for the filter test"
+    ann = FakeANN(list(docs), docs=docs)
+    dag = build_search_dag(FakeEmbedder(), ann, FakeReranker(), FakeStore(docs))
     filters = {"domains": ["example.com"], "terms": ["alpha", "beta"]}
     res = run_search(dag, "q", filters, top_k=5)
     assert ann.seen_kwargs and ann.seen_kwargs[0] == filters
     assert res["results"]  # non-empty: orch only renames, never interprets
+    # The fake resolves the filter with the Rust semantics, so all three
+    # docs (each containing both terms on example.com) survive.
+    assert {r["id"] for r in res["results"]} == {"d0", "d1", "d2"}
 
 
 def test_spec_shape_filters_translate_to_rust_kwargs():
