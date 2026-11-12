@@ -1,5 +1,7 @@
 import json
 import os
+import threading
+import time
 
 from exa_home.store import OFFSETS_FILENAME, ContentStore
 
@@ -42,11 +44,13 @@ def test_bulk_offsets_roundtrip_no_rescan(tmp_path):
         serial = json.loads(f.read())
     assert set(serial) == {f"d{i}" for i in range(5)}
     # Shard names are portable basenames, offsets are ints; the record
-    # length rides along so a stale offset is detectable.
+    # length + content digest ride along so a stale/substituted record is
+    # detectable.
     for entry in serial.values():
         shard, off = entry[0], entry[1]
         assert "/" not in shard and isinstance(off, int)
-        assert len(entry) == 3 and isinstance(entry[2], int)
+        assert len(entry) == 4 and isinstance(entry[2], int)
+        assert isinstance(entry[3], str) and len(entry[3]) == 64
 
     fresh = ContentStore(root)
     assert fresh._index is None
@@ -148,3 +152,139 @@ def test_put_records_the_offset_it_wrote_to(tmp_path, monkeypatch):
     fresh = ContentStore(root)
     assert fresh.get(b)["text"] == "bbb"
     assert fresh.get(a)["text"] == "aaa"
+
+
+def test_store_serves_original_content_after_in_place_mutation(tmp_path):
+    """Same id, same length, different bytes: the build-time digest wins.
+
+    Without the digest the stale offset happily returns substituted
+    content under the requested id (finding P1-04).
+    """
+    root = str(tmp_path)
+    s = ContentStore(root)
+    s.begin_bulk()
+    s.put(_doc("a", "original content"))
+    s.save_index()
+
+    shard = s._shard("a")
+    with open(shard, "rb") as f:
+        raw = f.read()
+    original = json.dumps(_doc("a", "original content"))
+    replaced = json.dumps(_doc("a", "tampered content"))
+    assert len(original) == len(replaced)
+    with open(shard, "wb") as f:
+        f.write(raw.replace(original.encode(), replaced.encode()))
+
+    fresh = ContentStore(root)
+    assert fresh.get("a") is None, "substituted content was served"
+    # A full rescan must not re-trust the tampered bytes either.
+    assert fresh.get("a") is None
+
+
+def test_store_concurrent_gets_do_not_serialize_disk_io(tmp_path, monkeypatch):
+    """8 concurrent cold gets must overlap their reads, not queue behind a
+    global lock (finding P1-01: 0.28x at 8 threads)."""
+    root = str(tmp_path)
+    s = ContentStore(root)
+    s.begin_bulk()
+    ids = [f"d{i}" for i in range(8)]
+    for i, doc_id in enumerate(ids):
+        s.put(_doc(doc_id, f"text {i}"))
+    s.save_index()
+
+    fresh = ContentStore(root)
+    real_read = fresh._read_record
+
+    def slow_read(*args, **kwargs):
+        time.sleep(0.05)
+        return real_read(*args, **kwargs)
+
+    monkeypatch.setattr(fresh, "_read_record", slow_read)
+    errors: list[BaseException] = []
+
+    def worker(doc_id):
+        try:
+            assert fresh.get(doc_id)["id"] == doc_id
+        except BaseException as e:  # noqa: BLE001 — surface in the main thread
+            errors.append(e)
+
+    t0 = time.perf_counter()
+    threads = [threading.Thread(target=worker, args=(i,)) for i in ids]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    elapsed = time.perf_counter() - t0
+    assert not errors
+    # Serial would be 8 * 50ms = 400ms; overlapping reads stay far below.
+    assert elapsed < 0.25, f"reads serialized: {elapsed:.3f}s"
+
+
+def test_store_rescan_is_bounded_to_appended_tail(tmp_path):
+    """A newly appended doc rescans only the appended bytes, not the whole
+    shard (finding P1-02: 13-20ms per new-doc get)."""
+    root = str(tmp_path)
+    s = ContentStore(root)
+    s.begin_bulk()
+    target_shard = s._shard("appended")
+    # Fill ONE shard with many records so a full rescan would be expensive.
+    same_shard = [
+        f"doc-{i}" for i in range(20_000) if s._shard(f"doc-{i}") == target_shard
+    ][:200]
+    assert len(same_shard) == 200
+    for i, doc_id in enumerate(same_shard):
+        s.put(_doc(doc_id, f"body {i} " + "x" * 100))
+    s.save_index()
+
+    fresh = ContentStore(root)
+    fresh._ensure_index()
+    shard_size = os.path.getsize(target_shard)
+    # Append one new record directly to the shard (a later ingest batch).
+    appended = (json.dumps(_doc("appended", "new body")) + "\n").encode()
+    with open(target_shard, "ab") as f:
+        f.write(appended)
+
+    fresh.stats["scan_bytes"] = 0
+    assert fresh.get("appended")["text"] == "new body"
+    assert fresh.stats["scan_bytes"] <= len(appended) + 1
+    assert fresh.stats["scan_bytes"] < shard_size / 10
+
+
+def test_store_lru_byte_budget_evicts(tmp_path):
+    """The LRU is bounded by bytes, not only by entry count (P2-12)."""
+    s = ContentStore(str(tmp_path), lru_size=10_000, lru_bytes=1_000)
+    for i in range(6):
+        s.put(_doc(f"d{i}", "y" * 400))
+    for i in range(6):
+        assert s.get(f"d{i}") is not None
+    assert s._lru_used <= 1_000
+    assert len(s._lru) <= 2
+
+
+def test_store_get_many_matches_individual_gets(tmp_path):
+    s = ContentStore(str(tmp_path))
+    for i in range(5):
+        s.put(_doc(f"d{i}", f"body {i}"))
+    got = s.get_many(["d0", "d3", "missing"])
+    assert got["d0"]["text"] == "body 0"
+    assert got["d3"]["text"] == "body 3"
+    assert got["missing"] is None
+    assert s.get("d0")["text"] == "body 0"
+
+
+def test_store_bulk_keeps_handles_open_until_save(tmp_path):
+    """Bulk puts reuse one append handle per shard (P2-07)."""
+    s = ContentStore(str(tmp_path))
+    s.begin_bulk()
+    s.put(_doc("a"))
+    s.put(_doc("b"))
+    assert s._bulk_handles, "bulk mode did not open a cached handle"
+    handles = dict(s._bulk_handles)
+    s.put(_doc("c"))
+    # Same handle object reused for later puts.
+    for path, handle in handles.items():
+        assert s._bulk_handles[path] is handle
+    s.save_index()
+    assert s._bulk_handles is None
+    fresh = ContentStore(str(tmp_path))
+    assert fresh.get("c")["id"] == "c"
