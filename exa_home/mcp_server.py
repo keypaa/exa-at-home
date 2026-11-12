@@ -11,6 +11,9 @@
 # - `main()` is the runnable entry point: `python -m exa_home.mcp_server
 #   --index index/ --port 8080`. HTTP mode is token-authenticated and
 #   rate-limited; stdio mode is local-only and needs no token.
+# - Index integrity is verified by the manifest at load time, but the
+#   manifest is not an authenticity proof: serve only indexes you trust (or
+#   extend verify_manifest_signature for a signed trust anchor).
 from __future__ import annotations
 
 import hmac

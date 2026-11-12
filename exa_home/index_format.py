@@ -3,6 +3,12 @@
 
 SCHEMA locks the on-disk layout (Task 6, M3); the Rust loader in
 crates/ann-core/src/index.rs implements to these same constants.
+
+Trust boundary: the manifest is an INTEGRITY check (detects corruption /
+tampering of the files it names) but not an AUTHENTICITY check — a caller
+who can replace index files can replace manifest.json to match. Serving an
+index from an untrusted location therefore requires an out-of-band trust
+anchor (e.g. a signature verified by `verify_manifest_signature`).
 """
 
 from __future__ import annotations
@@ -126,9 +132,27 @@ def write_manifest(index_dir: str, meta: dict) -> None:
         )
 
 
+def verify_manifest_signature(index_dir: str, manifest: dict) -> None:
+    """Authenticity hook for manifest.json (default: no-op).
+
+    `verify_manifest` checks INTEGRITY only: it proves the files match the
+    hashes recorded in manifest.json, not that the manifest itself came from
+    a trusted builder. A deployment that serves an index supplied by an
+    untrusted party should verify a detached signature or an out-of-band
+    digest here and raise ValueError on failure. The hook receives the
+    parsed manifest so a real implementation can bind the signature to its
+    content.
+    """
+    return
+
+
 def verify_manifest(index_dir: str) -> dict:
-    with open(os.path.join(index_dir, MANIFEST)) as f:
+    with open(os.path.join(index_dir, MANIFEST), encoding="utf-8") as f:
         m = json.load(f)
+    # Authenticity is checked first (a signature, if any, is the trust
+    # anchor for the hashes we are about to rely on). The default hook is a
+    # documented no-op: integrity-only.
+    verify_manifest_signature(index_dir, m)
     if m.get("version") != SCHEMA_VERSION:
         raise ValueError(
             f"unsupported index version {m.get('version')!r}: "
