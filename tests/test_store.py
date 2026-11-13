@@ -510,3 +510,23 @@ def test_reset_closes_open_bulk_handles_and_allows_a_rebuild(tmp_path):
     s.put(_doc(a, "rebuilt"))
     s.save_index()
     assert ContentStore(root).get(a)["text"] == "rebuilt"
+
+
+def test_put_line_matches_put_bytes_and_roundtrip(tmp_path):
+    """The bulk build path stores the original JSONL line without a second
+    JSON dump; it must produce the same bytes/offsets as put()."""
+    root = str(tmp_path)
+    s = ContentStore(root)
+    s.begin_bulk()
+    doc = _doc("line-doc", "stored from a line")
+    line = json.dumps(doc)
+    s.put_line(line)
+    s.save_index()
+
+    fresh = ContentStore(root)
+    assert fresh.get("line-doc")["text"] == "stored from a line"
+    # The stored record is exactly the line plus its newline.
+    shard, off, length, _digest = fresh._index["line-doc"]
+    with open(shard, "rb") as f:
+        f.seek(off)
+        assert f.read(length) == (line + "\n").encode()

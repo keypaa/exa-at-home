@@ -134,13 +134,59 @@ def chunk_size(k: int) -> int:
     return max(MIN_CHUNK, CHUNK_BYTES // (k * 4))
 
 
-def assign(vecs, centroids, verbose: bool = False):
+def assign(
+    vecs,
+    centroids,
+    verbose: bool = False,
+    device: str = "auto",
+):
+    """Assign every row to its nearest centroid.
+
+    CPU: chunked numpy matmul, bounded by CHUNK_BYTES.
+    CUDA (device="cuda" or "auto" with a GPU): the same chunked matmul on the
+    GPU. At 5M docs / K=30k the CPU path is ~38 TFLOP on 4 cores; the GPU is
+    one to two orders of magnitude faster. The result is identical up to
+    argmax tie order (float score ties are measure-zero in practice).
+    """
     import numpy as np
+
+    if device == "auto":
+        try:
+            import torch
+
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+        except Exception:  # noqa: BLE001 — torch missing means CPU
+            device = "cpu"
 
     n = len(vecs)
     out = np.empty(n, dtype=np.int64)
     chunk = chunk_size(len(centroids))
     n_chunks = (n + chunk - 1) // chunk
+
+    if device == "cuda":
+        try:
+            import torch
+        except Exception:  # noqa: BLE001
+            print("assign: torch unavailable; falling back to CPU", flush=True)
+        else:
+            cent = torch.from_numpy(
+                np.ascontiguousarray(centroids, dtype=np.float32)
+            ).to(device)
+            with torch.inference_mode():
+                for i, s in enumerate(range(0, n, chunk)):
+                    e = min(s + chunk, n)
+                    x = torch.from_numpy(
+                        np.array(vecs[s:e], dtype=np.float32, copy=True)
+                    ).to(device)
+                    idx = torch.argmax(x @ cent.T, dim=1)
+                    out[s:e] = idx.to("cpu").numpy()
+                    if verbose and (i + 1) % max(1, n_chunks // 10) == 0:
+                        print(
+                            f"assign(cuda): chunk {i + 1}/{n_chunks} ({e}/{n} docs)",
+                            flush=True,
+                        )
+            return out
+
     for i, s in enumerate(range(0, n, chunk)):
         e = min(s + chunk, n)
         out[s:e] = np.argmax(vecs[s:e] @ centroids.T, axis=1)
@@ -189,6 +235,7 @@ def main(
     source: dict | None = None,
     progress_every: int = 100_000,
     reset_store: bool = True,
+    device: str = "auto",
 ) -> dict:
     if no_store and store is not None:
         # Contradictory request: "do not build a store" but "use this
@@ -226,7 +273,7 @@ def main(
             f"({chunk_size(k)} rows/chunk, {CHUNK_BYTES // (1024 * 1024)} MiB budget)",
             flush=True,
         )
-    assign_v = assign(vecs, centroids, verbose=verbose)
+    assign_v = assign(vecs, centroids, verbose=verbose, device=device)
 
     centroids.astype("<f4").tofile(os.path.join(out, CENTROIDS_FILE))
     pack = np.packbits((vecs > 0).astype(np.uint8), axis=1, bitorder="little")
@@ -250,8 +297,6 @@ def main(
             if verbose and pruned:
                 print(f"[store] pruned {pruned} stale file(s)", flush=True)
     else:
-        from scripts.jsonl import read_jsonl
-
         store_dir = store or os.path.join(out, "store")
         cs = ContentStore(store_dir)
         if reset_store:
@@ -267,11 +312,17 @@ def main(
         # Track offsets during the bulk write so no rescan is needed:
         # save_index() persists store/offsets.json for O(1) cold gets.
         cs.begin_bulk()
-        for d in read_jsonl(docs_path):
-            cs.put(d)
-            n_stored += 1
-            if verbose and n_stored % max(1, progress_every) == 0:
-                print(f"store: {n_stored}/{n} docs", flush=True)
+        # Write the original JSONL line: no parse -> dict -> dump round-trip.
+        # put_line still extracts the id (and validates the line), but the
+        # text is copied byte-for-byte, which is the bulk of the store I/O.
+        with open(docs_path, encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                cs.put_line(line)
+                n_stored += 1
+                if verbose and n_stored % max(1, progress_every) == 0:
+                    print(f"store: {n_stored}/{n} docs", flush=True)
         if n_stored != n:
             raise ValueError(f"{docs_path}: {n_stored} docs vs {n} vecs")
         cs.save_index()
@@ -335,6 +386,12 @@ if __name__ == "__main__":
     ap.add_argument("--crawl", default=CRAWL)
     ap.add_argument("--progress-every", dest="progress_every", type=int, default=100000)
     ap.add_argument(
+        "--device",
+        choices=["auto", "cuda", "cpu"],
+        default="auto",
+        help="centroid assignment device (auto uses CUDA when available)",
+    )
+    ap.add_argument(
         "--verbose",
         action="store_true",
         help="progress output (assign/store/lists stages)",
@@ -354,4 +411,5 @@ if __name__ == "__main__":
         verbose=a.verbose,
         progress_every=max(1, a.progress_every),
         reset_store=a.reset_store,
+        device=a.device,
     )

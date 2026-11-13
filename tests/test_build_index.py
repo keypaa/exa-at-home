@@ -869,3 +869,34 @@ def test_no_store_with_a_custom_store_path_is_rejected(tmp_path):
             store=str(tmp_path / "custom-store"),
             no_store=True,
         )
+
+
+def test_assign_cpu_matches_numpy():
+    """The GPU path must be a drop-in for the CPU argmax (tie order aside)."""
+    import numpy as np
+
+    from scripts.build_index import assign
+
+    rng = np.random.default_rng(0)
+    vecs = rng.normal(size=(50, 8)).astype(np.float32)
+    cent = vecs[rng.choice(50, 4, replace=False)]
+    got = assign(vecs, cent, device="cpu")
+    want = np.argmax(vecs @ cent.T, axis=1)
+    assert np.array_equal(got, want)
+
+
+def test_assign_cuda_matches_numpy_when_available():
+    import numpy as np
+    import pytest
+
+    torch = pytest.importorskip("torch")
+    if not torch.cuda.is_available():
+        pytest.skip("no CUDA")
+    from scripts.build_index import assign
+
+    rng = np.random.default_rng(1)
+    vecs = rng.normal(size=(2048, 8)).astype(np.float32)
+    cent = vecs[rng.choice(2048, 16, replace=False)]
+    got = assign(vecs, cent, device="cuda")
+    want = np.argmax(vecs @ cent.T, axis=1)
+    assert np.array_equal(got, want)

@@ -151,9 +151,9 @@ class ContentStore:
                     removed += 1
         return removed
 
-    def put(self, doc: dict) -> None:
-        path = self._shard(doc["id"])
-        payload = (json.dumps(doc) + "\n").encode("utf-8")
+    def _append_payload(self, doc_id: str, payload: bytes) -> None:
+        """Append one already-serialized record and index its offset."""
+        path = self._shard(doc_id)
         digest = hashlib.sha256(payload).hexdigest()
         with self._lock:
             if self._bulk_handles is not None:
@@ -169,11 +169,30 @@ class ContentStore:
                 with open(path, "ab") as f:
                     off = f.tell()
                     f.write(payload)
-            self._untrusted_ids.discard(doc["id"])
+            self._untrusted_ids.discard(doc_id)
             if self._index is None:
                 return
-            self._index[doc["id"]] = (path, off, len(payload), digest)
+            self._index[doc_id] = (path, off, len(payload), digest)
             self._shard_sizes[path] = off + len(payload)
+
+    def put(self, doc: dict) -> None:
+        payload = (json.dumps(doc) + "\n").encode("utf-8")
+        self._append_payload(doc["id"], payload)
+
+    def put_line(self, line: str, doc_id: str | None = None) -> None:
+        """Append an already-serialized JSON object line.
+
+        The index build reads docs.jsonl and used to parse every line into a
+        dict and then `json.dumps` it again just to store the same bytes.
+        This writes the line as-is (adding the trailing newline if needed);
+        the id is parsed only when the caller does not supply it. The stored
+        bytes, offset and digest are identical to `put()`.
+        """
+        if not line.endswith("\n"):
+            line += "\n"
+        if doc_id is None:
+            doc_id = json.loads(line)["id"]
+        self._append_payload(doc_id, line.encode("utf-8"))
 
     def save_index(self) -> str:
         with self._lock:

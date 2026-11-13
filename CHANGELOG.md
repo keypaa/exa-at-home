@@ -57,6 +57,20 @@
   never outlive the index it belongs to. `--no-reset-store` keeps the
   append/merge semantics as an explicit opt-out.
 
+### Performance
+- Embedding: the production path tokenizes each chunk once (no duplicate
+  `_token_lengths` pass), sorts by token length, and pads each batch to its
+  own longest member instead of the whole chunk; `max_seq_length` is a
+  parameter recorded in the resume state/provenance.
+- Store/index: `ContentStore.put_line` stores the original JSONL line
+  byte-for-byte; `build_index` uses it, removing a full JSON parse→dump
+  round-trip over the corpus.
+- Index: `assign(device="auto"|"cuda"|"cpu")` runs the centroid matmul on the
+  GPU when available (5M/K=30k CPU is ~38 TFLOP); `train_centroids` exposes
+  `--n-init`/`--max-iter` for the K-means quality/speed A/B.
+- Added `docs/SCALE_PLAN.md`: mmap + shard architecture and the stage-by-stage
+  optimization backlog for 50M → 10B docs.
+
 ### Security
 - `index/manifest.json` is documented (and hooked via
   `verify_manifest_signature`) as an integrity check, not an authenticity
