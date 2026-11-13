@@ -13,7 +13,7 @@ use pyo3::prelude::*;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 pub const SCHEMA_VERSION: u32 = 1;
 pub const DIM: usize = 256;
@@ -84,6 +84,24 @@ fn read_u32_le(raw: &[u8], off: &mut usize, what: &str) -> Result<u32, String> {
 /// `ids.len() == nrows` is enforced here (not call-site).
 pub fn load(dir: &Path) -> Result<Loaded, String> {
     let file = |name: &str| -> PathBuf { dir.join(name) };
+    let root = fs::canonicalize(dir)
+        .map_err(|e| format!("cannot resolve index dir {}: {e}", dir.display()))?;
+    // Manifest keys are attacker-controlled. Reject absolute paths, `..`,
+    // and symlinks that resolve outside the index before reading/hashing
+    // (otherwise the verifier discloses 12 hex chars of an arbitrary file).
+    let safe_file = |name: &str| -> Result<PathBuf, String> {
+        let rel = Path::new(name);
+        if rel.is_absolute() || rel.components().any(|c| !matches!(c, Component::Normal(_))) {
+            return Err(format!("{MANIFEST}: unsafe file key {name:?}"));
+        }
+        let joined = dir.join(rel);
+        let canon =
+            fs::canonicalize(&joined).map_err(|e| format!("cannot read index file {name}: {e}"))?;
+        if !canon.starts_with(&root) {
+            return Err(format!("{MANIFEST}: unsafe file key {name:?}"));
+        }
+        Ok(joined)
+    };
 
     let mraw = fs::read(file(MANIFEST)).map_err(|e| format!("cannot read {MANIFEST}: {e}"))?;
     let m: serde_json::Value =
@@ -129,8 +147,8 @@ pub fn load(dir: &Path) -> Result<Loaded, String> {
         })
         .collect::<Result<_, _>>()?;
     for (name, hex) in &want {
-        let got =
-            sha256_file(&file(name)).map_err(|e| format!("cannot read index file {name}: {e}"))?;
+        let path = safe_file(name)?;
+        let got = sha256_file(&path).map_err(|e| format!("cannot read index file {name}: {e}"))?;
         if got != *hex {
             return Err(format!(
                 "corrupt index file {name}: want {} got {}",

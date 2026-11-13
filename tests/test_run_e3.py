@@ -62,23 +62,32 @@ def test_validate_docs_rejects_corpus_mismatch(tmp_path):
         validate_docs_for_index(docs, index)
 
 
-def test_validate_docs_legacy_source_checks_size(tmp_path):
+def test_validate_docs_legacy_source_without_hash_fails_closed(tmp_path):
+    """A size-only check lets a same-size foreign corpus through."""
     docs = tmp_path / "docs.jsonl"
     docs.write_text('{"id": "a"}\n')
     index = tmp_path / "index"
     index.mkdir()
-    write_source(str(index), {"docs_size": docs.stat().st_size + 1})
-    with pytest.raises(ValueError, match="size"):
+    write_source(str(index), {"docs_size": docs.stat().st_size})
+    with pytest.raises(ValueError, match="predates docs hashing"):
         validate_docs_for_index(docs, index)
 
 
-def test_validate_docs_without_provenance_warns_but_allows(tmp_path, capsys):
+def test_validate_docs_without_provenance_fails_closed(tmp_path):
     docs = tmp_path / "docs.jsonl"
     docs.write_text('{"id": "a"}\n')
     index = tmp_path / "index"
     index.mkdir()
-    assert validate_docs_for_index(docs, index) == docs_fingerprint(docs)
-    assert "no source provenance" in capsys.readouterr().err
+    with pytest.raises(ValueError, match="no source provenance"):
+        validate_docs_for_index(docs, index)
+
+
+def test_validate_docs_missing_file_is_a_clean_error(tmp_path):
+    index = tmp_path / "index"
+    index.mkdir()
+    write_source(str(index), {"docs_sha256": "a" * 64})
+    with pytest.raises(ValueError, match="does not exist"):
+        validate_docs_for_index(tmp_path / "missing.jsonl", index)
 
 
 def test_targets_path_is_corpus_fingerprinted(tmp_path):
@@ -89,3 +98,10 @@ def test_targets_path_is_corpus_fingerprinted(tmp_path):
     assert p.name == f"sampled_targets.docs.{fp[:12]}.json"
     # No fingerprint (legacy call) keeps the old file name.
     assert targets_path_for(docs).name == "sampled_targets.docs.json"
+
+
+def test_ratio_handles_empty_question_set():
+    from scripts.run_e3 import _ratio
+
+    assert _ratio(0, 0) == 0.0
+    assert _ratio(3, 6) == 0.5

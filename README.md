@@ -17,7 +17,7 @@ ledger rows before citing these as reproduced results.
 G1 exact-id recall@10 **0.359** stayed inside the pre-registered −0.10 drop budget
 (81 k reranked baseline 0.2885 → limit 0.1885). There is **no 1 M relevance (G4) or
 answer-coverage (G2) number** — the 50-question set has never been re-anchored into
-the 1 M haystack (see [`eval/E3_PROTOCOL.md`](eval/E3_PROTOCOL.md) §D1). Toy numbers
+the 1 M haystack (see [`eval/E3_PROTOCOL.md`](eval/E3_PROTOCOL.md)). Toy numbers
 below are on the toy corpus and must not be read as 1 M evidence.
 
 **On question-like queries** (50 natural questions, known target pages):
@@ -106,8 +106,8 @@ python -m venv .venv && source .venv/bin/activate
 pip install -e .[dev]
 export PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1  # only on Python 3.14 + PyO3 0.22
 cd crates/ann-core && maturin develop && cd ../..
-python -m pytest tests/ -m "not cloud_only" -q   # 174 passed, 7 deselected
-cargo test -p ann-core                            # 28 passed
+python -m pytest tests/ -m "not cloud_only" -q   # 225 passed, 7 deselected
+cargo test -p ann-core                            # 29 passed
 ```
 
 Anything needing a model, GPU, or >1k docs is `@pytest.mark.cloud_only`
@@ -191,10 +191,10 @@ implements G1–G4 with hardcoded thresholds and CI runs `gate.py --synth`)
   target recall@10 0.740 = 0.740; MRR 0.641 → 0.712 (+0.071, p=0.18, n.s.).
   Question-vs-prefix behaviour (not a coefficient of the default) determines it.
 - [x] **1 M scale exercise complete on the box** (2026-10-25) — unranked 130 WET, 2.58 M docs,
-  K=10 k, G1 reranked **0.359** (−0.0705 vs 81 k 0.2885), G3 **p50 75.562 / p99 131.151 ms**,
-  `top_coarse` 100 is over-budget. G2 at 1 M is **unmeasured (0.00 / 0.00 is "not re-anchored",
-  not a quality claim)**: the 50 committed questions are not each re-anchored into the 1 M
-  haystack. **The ledger rows for this run are not committed — see "Measurement status"**.
+  K=10 k, G1 reranked **0.359** (+0.0705 vs 81 k 0.2885), G3 **p50 75.562 / p99 131.151 ms**,
+  `top_coarse` 100 is over-budget. G2 at 1 M is **unmeasured** (the 0.660/0.680 rows in
+  `runs.jsonl` are the box toy slice, not 1 M): the 50 committed questions are not each
+  re-anchored into the 1 M haystack. **The ledger rows for this run are not committed — see "Measurement status"**.
 - [ ] Waterfall tolerance 10%+2ms; optional answer/similar DAG nodes
 
 ## License
@@ -227,11 +227,12 @@ re-run the gate. Model weights are cached under `$HF_HOME` /
   one-million-row entries. Until those rows (or a fresh 1 M run) are committed, the numbers
   are **not reproducible from this repo** — re-run and commit before citing them as evidence.
   G2 (target-doc coverage) remains **non-comparable** at 1 M until the fixed 50-question
-  set is re-anchored into the 1 M haystack (`eval/E3_PROTOCOL.md` §D1); no 5 M numbers
+  set is re-anchored into the 1 M haystack (`eval/E3_PROTOCOL.md`); no 5 M numbers
   exist yet.
 
-- **5 M runs are deferred** until every PR in the 1 M hardening queue is clean and one
-  **soft gate threshold** document is merged with the measured nprobe curve.
+- **5 M runs are deferred** until the 1 M ledger rows are committed, the golden
+  50-question set is re-anchored into the 1 M haystack (G2), and ingest
+  parallelization (WORKPLAN item 5b) lands with a measured docs/s.
 
 Working plan and open decisions: [`WORKPLAN.md`](WORKPLAN.md).
 The map — what we did, what we're doing, what's next, where it's going: [`ROADMAP.md`](ROADMAP.md).

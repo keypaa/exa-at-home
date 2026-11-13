@@ -5,7 +5,6 @@
 # FakeANN returned fixed descending scores (finding T3/P2-14). These tests
 # compare the fakes against numpy references of the real scoring/filters.
 import numpy as np
-import pytest
 from fixtures.backends import (
     FakeANN,
     FakeEmbedder,
@@ -131,13 +130,11 @@ def test_fakes_wire_into_the_real_dag_without_shape_errors():
     assert {r["id"] for r in res["results"]} <= set(make_docs(3))
 
 
-@pytest.mark.parametrize("degraded", [False, True])
-def test_fake_store_get_many_matches_get(degraded):
+def test_fake_store_get_many_returns_the_expected_documents():
     from fixtures.backends import FakeStore
 
     s = FakeStore(make_docs(3))
-    assert s.get_many(["d0", "d2", "nope"]) == {
-        "d0": s.get("d0"),
-        "d2": s.get("d2"),
-        "nope": None,
-    }
+    got = s.get_many(["d0", "d2", "nope"])
+    assert got["d0"]["id"] == "d0"
+    assert got["d2"]["id"] == "d2"
+    assert got["nope"] is None

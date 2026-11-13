@@ -103,18 +103,22 @@ def _read_provenance(artifact: str) -> dict | None:
 
 
 def _wet_fingerprint(wet_dir: str) -> str:
-    """Content-sensitive fingerprint of the WET file set.
+    """Content hash of the WET file set (names + every byte).
 
-    Hashes (basename, size, mtime_ns) instead of every byte: a WET corpus
-    is tens of GB at full scale, and mtime changes on any real replacement
-    or rewrite. This is change detection, not a cryptographic commitment.
+    Size+mtime was not provenance: `cp -p`, `rsync -t`, tar restores and
+    coarse filesystems preserve mtime, so a same-size rewrite could reuse
+    docs built from different WET bytes. A full streaming pass costs
+    ~10 s for the 8 GB 1M corpus, which is cheap next to ingest.
     """
-    entries = []
+    h = hashlib.sha256()
     for path in wet_files(wet_dir):
-        st = os.stat(path)
-        entries.append([os.path.basename(path), st.st_size, st.st_mtime_ns])
-    blob = json.dumps(entries, separators=(",", ":")).encode()
-    return hashlib.sha256(blob).hexdigest()
+        h.update(os.path.basename(path).encode("utf-8"))
+        h.update(b"\0")
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk)
+        h.update(b"\0")
+    return h.hexdigest()
 
 
 def _skip(path: str, force: bool) -> bool:
@@ -171,18 +175,21 @@ def stage_download(
 ) -> str:
     """WET URLs -> data dir. Delegates to download_wet.py."""
     from scripts.download_wet import main as dl_main
+    from scripts.download_wet import verify_wet_gzip
 
     t0 = time.perf_counter()
     with open(urls_file) as f:
         urls = [line.strip() for line in f if line.strip()]
     expected = {u.rsplit("/", 1)[-1] for u in urls}
-    if not force and os.path.isdir(out_dir):
+    if os.path.isdir(out_dir):
         # Provenance gate (finding C1): the old check was `have >= len(urls)`,
         # so a directory holding files from a DIFFERENT crawl was reused
         # whenever it had enough of them. Only an exact name-set match is
         # the corpus this URLs file describes; prune foreign WET files so
-        # ingest cannot pick them up either.
-        present = {os.path.basename(p) for p in wet_files(out_dir)}
+        # ingest cannot pick them up either. This runs under --force too:
+        # otherwise the repair path leaves foreign files for ingest.
+        present_paths = wet_files(out_dir)
+        present = {os.path.basename(p) for p in present_paths}
         extras = present - expected
         if extras:
             print(
@@ -192,28 +199,49 @@ def stage_download(
                 file=sys.stderr,
                 flush=True,
             )
-            for path in wet_files(out_dir):
+            for path in present_paths:
                 if os.path.basename(path) in extras:
                     os.remove(path)
+            present_paths = [
+                p for p in present_paths if os.path.basename(p) not in extras
+            ]
             present -= extras
-        missing = expected - present
-        empty = {
-            os.path.basename(p) for p in wet_files(out_dir) if os.path.getsize(p) == 0
-        }
-        if not missing and not empty:
-            if verbose:
+        if not force:
+            # Reuse is only safe when the bytes are the corpus: a truncated
+            # or corrupt non-empty file used to be accepted forever because
+            # the reuse path skipped C9's gzip/CRC verification.
+            invalid: set[str] = set()
+            for path in present_paths:
+                try:
+                    verify_wet_gzip(path)
+                except OSError:
+                    invalid.add(os.path.basename(path))
+            missing = expected - present
+            if not missing and not invalid:
+                if verbose:
+                    print(
+                        f"[download] reusing {out_dir} ({len(present)} files, "
+                        f"matches {urls_file})",
+                        flush=True,
+                    )
+                return out_dir
+            if invalid:
                 print(
-                    f"[download] reusing {out_dir} ({len(present)} files, "
-                    f"matches {urls_file})",
+                    f"[download] removing {len(invalid)} corrupt WET file(s): "
+                    f"{', '.join(sorted(invalid)[:3])}"
+                    + (" ..." if len(invalid) > 3 else ""),
+                    file=sys.stderr,
                     flush=True,
                 )
-            return out_dir
-        if verbose and (missing or empty):
-            print(
-                f"[download] {out_dir} does not match {urls_file} "
-                f"(missing={len(missing)}, empty={len(empty)}) — downloading",
-                flush=True,
-            )
+                for path in present_paths:
+                    if os.path.basename(path) in invalid:
+                        os.remove(path)
+            if verbose and (missing or invalid):
+                print(
+                    f"[download] {out_dir} does not match {urls_file} "
+                    f"(missing={len(missing)}, corrupt={len(invalid)}) — downloading",
+                    flush=True,
+                )
     os.makedirs(out_dir, exist_ok=True)
     # download_wet takes a urls file; reuse the caller's file directly.
     dl_main(urls_file, out_dir, workers)
@@ -232,6 +260,14 @@ def stage_ingest(
     from exa_home.ingest import read_wet, write_docs_jsonl
 
     t0 = time.perf_counter()
+    files = wet_files(wet_dir)
+    if not files:
+        # Never overwrite a good corpus with an empty one: a typo'd or
+        # cleaned --wet-dir used to leave a 0-byte docs.jsonl, destroying
+        # the only local copy of the corpus.
+        raise ValueError(
+            f"no WET files under {wet_dir!r}; refusing to overwrite {docs_path}"
+        )
     wet_fp = _wet_fingerprint(wet_dir)
     if not force and os.path.exists(docs_path):
         # Provenance gate (finding C3): docs.jsonl is reusable only when it
@@ -258,7 +294,6 @@ def stage_ingest(
         )
 
     def all_docs():
-        files = wet_files(wet_dir)
         if verbose:
             print(f"[ingest] {len(files)} WET files", flush=True)
         for i, p in enumerate(files, 1):
@@ -284,25 +319,40 @@ def stage_ingest(
     from scripts.ingest_dedup import mark_duplicate_rows
 
     dup_rows = mark_duplicate_rows(tmp)
-    with (
-        open(docs_path, "w", encoding="utf-8") as fout,
-        open(tmp, encoding="utf-8") as fin,
-    ):
-        for idx, line in enumerate(fin):
-            d = json.loads(line)
-            url = d.get("url", "")
-            subset = d.get("subset", "")
-            if rx.search(url) or (subset and rx.search(subset)):
-                excluded += 1
-                continue
-            if dup_rows[idx]:
-                dup_urls += 1
-                continue
-            fout.write(json.dumps(d) + "\n")
-            kept += 1
-            if verbose and kept % 100_000 == 0:
-                print(f"[ingest] url-dedup: {kept}", flush=True)
-    os.remove(tmp)
+    # Write beside the target and replace only after a non-empty result:
+    # an exception mid-stream must leave the previous docs.jsonl intact.
+    new_path = docs_path + ".new"
+    try:
+        with (
+            open(new_path, "w", encoding="utf-8") as fout,
+            open(tmp, encoding="utf-8") as fin,
+        ):
+            for idx, line in enumerate(fin):
+                d = json.loads(line)
+                url = d.get("url", "")
+                subset = d.get("subset", "")
+                if rx.search(url) or (subset and rx.search(subset)):
+                    excluded += 1
+                    continue
+                if dup_rows[idx]:
+                    dup_urls += 1
+                    continue
+                fout.write(json.dumps(d) + "\n")
+                kept += 1
+                if verbose and kept % 100_000 == 0:
+                    print(f"[ingest] url-dedup: {kept}", flush=True)
+        if kept == 0:
+            raise ValueError(
+                f"ingest produced 0 documents from {wet_dir!r}; "
+                f"keeping existing {docs_path}"
+            )
+        os.replace(new_path, docs_path)
+    finally:
+        for path in (tmp, new_path):
+            try:
+                os.remove(path)
+            except FileNotFoundError:
+                pass
     docs_sha, docs_lines = _file_sha_and_lines(docs_path)
     _write_provenance(
         docs_path,

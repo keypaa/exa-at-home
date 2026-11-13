@@ -778,3 +778,94 @@ def test_select_slice_live_toy_run(tmp_path):
     assert len(urls) == 4
     assert all(u.startswith("https://data.commoncrawl.org/") for u in urls)
     assert all("/wet/" in u for u in urls)
+
+
+def test_same_source_rejects_same_size_docs_with_different_bytes():
+    """The index provenance must hash docs, not only size.
+
+    A same-size docs edit used to pass `same_source`, so the index was
+    reused for different text and stage_queries regenerated q/gt against
+    the old index (the stale-artifact class C2/C3 exists to close).
+    """
+    from scripts.build_index import same_source
+
+    base = {
+        "docs_size": 100,
+        "docs_sha256": "a" * 64,
+        "vecs_size": 200,
+        "vecs_sha256": "b" * 64,
+        "ids_size": 50,
+        "ids_sha256": "c" * 64,
+    }
+    assert same_source(base, dict(base))
+    changed = dict(base, docs_sha256="d" * 64)
+    assert not same_source(base, changed)
+
+
+def test_build_filter_main_is_callable_without_argparse_globals(tmp_path):
+    """C5: main() must take its inputs as parameters.
+
+    It used to read module-global `a`, so importing and calling it (the
+    pipeline path) raised NameError.
+    """
+    import scripts.build_filter as bf
+
+    docs = tmp_path / "docs.jsonl"
+    docs.write_text(
+        "\n".join(
+            json.dumps(
+                {
+                    "id": f"d{i}",
+                    "url": f"https://example.com/{i}",
+                    "title": "t",
+                    "text": "neural search and vector databases",
+                    "date": "2026-01-01",
+                }
+            )
+            for i in range(2)
+        )
+        + "\n"
+    )
+    out = tmp_path / "filter"
+    bf.main(str(docs), str(out), 50_000)
+    assert (out / "terms.bin").exists() and (out / "domains.json").exists()
+
+
+def test_build_index_loads_vectors_with_mmap(tmp_path, monkeypatch):
+    """C8: the 1M vector matrix must not be read fully into RAM."""
+    import numpy as np
+
+    from scripts.build_index import main as build
+
+    _vecs, _ids, _docs, _cent, vpath, ipath, cpath, dpath = _write_inputs(
+        tmp_path, n=8, k=4
+    )
+    real_load = np.load
+    seen = []
+
+    def recording_load(path, *args, **kwargs):
+        seen.append((str(path), kwargs.get("mmap_mode")))
+        return real_load(path, *args, **kwargs)
+
+    monkeypatch.setattr(np, "load", recording_load)
+    build(str(vpath), str(ipath), str(cpath), str(dpath), str(tmp_path / "index"))
+    assert (str(vpath), "r") in seen, seen
+
+
+def test_no_store_with_a_custom_store_path_is_rejected(tmp_path):
+    """Pruning a user-supplied --store under --no-store would be a surprise."""
+    from scripts.build_index import main as build
+
+    _vecs, _ids, _docs, _cent, vpath, ipath, cpath, dpath = _write_inputs(
+        tmp_path, n=8, k=4
+    )
+    with pytest.raises(ValueError, match="cannot be combined"):
+        build(
+            str(vpath),
+            str(ipath),
+            str(cpath),
+            str(dpath),
+            str(tmp_path / "index"),
+            store=str(tmp_path / "custom-store"),
+            no_store=True,
+        )

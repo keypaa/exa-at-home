@@ -31,15 +31,17 @@ def recall_at_10(gt_rows, pred_rows, on_skip=None) -> tuple[float | None, int]:
 
     Returns (recall, n_skipped); recall is None when nothing is comparable.
     """
-    seen_qids: set = set()
+    # One pass: pred_rows may be a generator (the docstring says iterable),
+    # and the old duplicate-check pass exhausted it, making every gt row
+    # look unpredicted (recall None, everything "skipped").
+    pr: dict = {}
     for r in pred_rows:
         qid = r["query_id"]
-        if qid in seen_qids:
+        if qid in pr:
             raise ValueError(
                 f"measure_recall: duplicate query_id {qid!r} in predictions"
             )
-        seen_qids.add(qid)
-    pr = {r["query_id"]: r["top10"] for r in pred_rows}
+        pr[qid] = r["top10"]
     recs: list[float] = []
     skipped = 0
     for g in gt_rows:

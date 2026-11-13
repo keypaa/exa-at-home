@@ -89,16 +89,22 @@ path; the full list is also published at
 **Cheap runs:** the full scan reads every row of every part file over HTTPS (~150GB for a 300-part crawl). Add `--max-parts N` (a strided sample of the part files; N must be >= `--limit-wet`) to cut the transfer proportionally.
 
 Slice sizes (researched, locked): **1M ≈ top-130 WET (~8GB)**;
-**5M ≈ top-620 WET (~38GB)**; toy = 4 WET (**~81k docs as measured on the box** — the ~10k figure predates the density-ranked slice and the dedup fixes).
+**5M ≈ top-620 WET (~38GB)**; toy = 4 WET (**~81k docs as measured on the box** — the ~10k figure predates the dedup fixes).
+
+The committed toy and the 2026-10-25 1M build used the **unranked** rule
+(first-N from `wet.paths.gz`), so the scale comparison isolates scale (D2).
+The commands below are the **density-ranked** English variant — a separate,
+separately reported run, never the same row.
 
 ```bash
-# toy slice (4 WET, ~81k docs) — density-ranked via the columnar fix above
+# toy slice (4 WET, ~81k docs) — density-ranked variant
 python scripts/select_slice.py --crawl CC-MAIN-2026-34 --lang eng \
     --limit-wet 4 --out wet_urls.txt && cat wet_urls.txt
-# (unranked fallback if DuckDB/HTTPS ever fails: first-N from wet.paths.gz,
-# no density ranking — ingest dedups downstream, fine for the toy only)
-# 1M slice (~130 WET, ~8GB) — density-ranked; unranked head -130 downloads
-# ~2.5x more for the same English yield.
+# (the unranked fallback is first-N from wet.paths.gz, no density ranking;
+# the committed toy used it)
+# 1M slice (~130 WET, ~8GB) — density-ranked variant; the committed 1M run
+# used the unranked head -130 (which downloads ~2.5x more for the same
+# English yield).
 python scripts/select_slice.py --crawl CC-MAIN-2026-34 --lang eng \
     --limit-wet 130 --out wet_urls_1M.txt
 # 5M slice (~620 WET, ~38GB) — same blocker as 1M.

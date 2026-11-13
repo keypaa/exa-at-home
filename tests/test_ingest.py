@@ -208,3 +208,16 @@ def test_stage_ingest_excludes_by_url_not_by_page_text(tmp_path):
     # The loss is visible in the reported stats.
     assert res["excluded"] == 2
     assert res["docs"] == 2
+
+
+def test_title_from_url_percent_decodes_and_splits():
+    from exa_home.ingest import _title_from_url
+
+    assert _title_from_url("https://e.co/how-to-build-an-ann.html") == (
+        "How To Build An Ann"
+    )
+    # %2F decodes to "/" and must split words, not leak into the title.
+    assert _title_from_url("https://e.co/foo%2Fbar.html") == "Foo Bar"
+    assert _title_from_url("https://e.co/") == ""
+    # One very long unbroken segment is not a usable title.
+    assert _title_from_url("https://e.co/" + "x" * 61 + ".html") == ""

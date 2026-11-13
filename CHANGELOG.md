@@ -3,6 +3,14 @@
 ## [Unreleased]
 
 ### Fixed
+- Review-hardening pass (2026-11-13): HTTP auth/rate limiting now runs as
+  Starlette ASGI middleware (real 401/429 responses); store misses on an
+  unchanged shard do not rescan it; `force_full` scans drop stale ids;
+  mixed-digest `offsets.json` fails closed; manifest keys are contained in
+  both the Python and Rust loaders and the build-only `centroids.npy` is
+  excluded; DAG/reranker timeouts retire only their own pool and never cancel
+  concurrent callers' queued work; `run_e3` provenance is fail-closed;
+  `--no-store --store` is rejected.
 - Track `Cargo.lock` so Rust dependency builds are reproducible (was gitignored).
 - `AnnIndex::new` now caps matrix elements (`MAX_MATRIX_ELEMENTS`) and returns a
   clean `ValueError` instead of aborting the process on an absurd strided shape.
@@ -11,7 +19,8 @@
 - `ContentStore._shard` reads `config.SHARD_COUNT` instead of a hardcoded `64`.
 - Store concurrency/latency (audit P1/P2/P5/P6/P10): split the global lock so
   cold reads no longer serialize; a miss for a newly appended doc scans only
-  the appended tail; each record carries a build-time content digest so an
+  the appended tail, and a miss on an unchanged shard does not rescan it at
+  all; each record carries a build-time content digest so an
   in-place same-id mutation resolves to a miss instead of substituted content;
   bulk loads keep one append handle per shard; added `get_many`; the RAM LRU is
   now byte-budgeted.
@@ -23,7 +32,8 @@
   `--config` / `configure_operating_point`.
 - MCP server (S1/S3/S4/P2-10): loopback bind by default; HTTP transport adds a
   constant-time bearer check (`--token` / `EXA_MCP_TOKEN`) and a sliding-window
-  rate limiter (`--rate-limit`) as FastMCP middleware; `mask_error_details` plus
+  rate limiter (`--rate-limit`) as Starlette ASGI middleware (real 401/429
+  responses, not a FastMCP hook); `mask_error_details` plus
   a tool wrapper redact internal errors into an `{"error": {code, message}}`
   shape; corpus strings are stripped of control characters and tagged
   `provenance="corpus"` / `untrusted=true`; `home_contents` paginates
@@ -58,15 +68,17 @@
 - Docs-truth pass (2026-11-13): contradictions between README / WORKPLAN /
   HANDOFF / ROADMAP / EXPERIMENTS / the vision spec resolved against the
   repo as it actually is — 1M numbers restated as box-only and *not*
-  reproducible (0 one-million rows in `runs.jsonl`), WORKPLAN TODO items 3/4/5/6
-  marked done (gates ship in `scripts/gate.py`, the 1M session plan exists, the
-  1M build/sweep ran 2026-10-25 without committed ledger rows), test counts
-  corrected (174 passed / 7 deselected; 7 `cloud_only`), ledger row count (32),
-  the 10M-vs-5M stretch conflict settled on the spec (5M), the dangling
-  `VISION.md` acceptance reference mapped to `ROADMAP.md`, README's stdio/HTTP
-  MCP examples fixed (`--port` removed from stdio; `--help` removed from the
-  HTTP line; gate-vs-integrity duty stated), and `cloud_only` CI coverage
-  described accurately (`|| true`, no GPU/box on hosted runners).
+  reproducible (0 one-million rows in `runs.jsonl`), WORKPLAN TODO items 3
+  and 4 marked done (gates ship in `scripts/gate.py`; the 1M session plan
+  exists), item 5 done on the box but not reproducible, item 6 partly done
+  (sweep cells recorded, no committed ledger rows), test counts corrected
+  (225 passed / 7 deselected; 29 Rust tests; 7 `cloud_only`), ledger row
+  count (32), the 10M-vs-5M stretch conflict settled on the spec (5M), the
+  dangling `VISION.md` acceptance reference mapped to `ROADMAP.md`, README's
+  stdio/HTTP MCP examples fixed (`--port` removed from stdio; `--help`
+  removed from the HTTP line; gate-vs-integrity duty stated), and
+  `cloud_only` CI coverage described accurately (`|| true`, no GPU/box on
+  hosted runners).
 - README: the "one config" paragraph now states the reality — `config.py` is
   the single source of truth and `config_loader.py` (Lane B) is a strict,
   optional hardware-profile adaptation layer consumed only via `--config`;
@@ -76,37 +88,48 @@
 - `SECURITY.md` rewritten around the shipped posture (loopback default,
   bearer + rate-limit middleware, redacted errors, corpus provenance,
   provenance-gated reuse, gzip-verified WET downloads).
+- Removed the duplicated paragraph; removed the misleading
+  `eval/e3_result_box_2026-10-25.json` (a copy of the toy result).
+- Marked the 1M box-performance numbers as uncommitted/unreproducible from
+  this repo.
+- Added `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`,
+  `CHANGELOG.md`.
 
 ### Tests
 - Store: fail-closed on in-place record substitution; concurrent cold reads
   overlap (no global-lock serialization); rescan bounded to the appended tail;
-  byte-budgeted LRU; `get_many`; bulk handle reuse.
+  an unchanged shard is not rescanned on a miss; byte-budgeted LRU;
+  `get_many`; bulk handle reuse.
 - Config: unknown keys / bad hardware values / `operating_point`-vs-`serving`
   conflicts raise; the loaded operating point drives the served defaults.
 - Ingest: dedup correctness + disk-backed structure over 60k records.
 - Pipeline: provenance gates for download / ingest / queries (regenerate on
   mismatch); download rejects corrupt same-size gzip.
 - MCP: error redaction, untrusted/provenance flags, operating-point
-  consumption, rate limiter, bearer check, CLI flags.
+  consumption, rate limiter, bearer check, CLI flags; the HTTP transport is
+  pinned with real 401/200/429 requests through `app.http_app()`.
 - Fake-backend parity (`tests/test_synth_parity.py`): 256-D embeddings,
   binary-dot similarity ranking, Rust filter semantics, degraded-rerank
   contract.
 - ANN recall (`tests/test_ann_recall.py`): exhaustive IVF equals brute force
   on unseen queries; measured recall bars and nprobe monotonicity.
 - Gate exit codes (`tests/test_gate_exit.py`): 0 pass / 1 hard-gate
-  regression / 2 usage error.
-- Index manifest excludes the content store at any depth and is written with
-  `encoding="utf-8"`.
+  regression / 2 usage error; a zero p50 is a measurement, an unavailable G2
+  is reported as skipped.
+- Index manifest excludes the content store at any depth and the build-only
+  `centroids.npy`; manifest keys are contained under the index in both the
+  Python and Rust loaders.
 - `e2e_latency.py` CLI defaults (`max_pair_tokens`, `batch_size`) now read from
   `config.OPERATING_POINT` instead of hardcoded 160/128.
 - `build_filter.main` accepts `verbose`/`progress_every` parameters (was a
   `NameError` when imported).
-- `measure_recall` raises `ValueError` on duplicate `query_id` in predictions.
+- `measure_recall` raises `ValueError` on duplicate `query_id` in predictions
+  and does not exhaust generator inputs.
 - `build_index.py` loads vectors with `np.load(..., mmap_mode="r")`.
 - `embed_resumable.py` accepts a completed final state (rows == n_docs) without
   requiring `--force`.
-- `run_e3.py` guards the empty-question-set `ZeroDivisionError` and warns when
-  the random `--nq` ground-truth path is used.
+- `run_e3.py` guards the empty-question-set `ZeroDivisionError`;
+  `ground_truth.py` warns when the random `--nq` ground-truth path is used.
 - `gate.py` explicitly reports skipped G1/G2 gates (`skipped`, `skip_reason`,
   `skipped_gates`) instead of silently omitting them.
 - `mcp_server.py` `home_search` retrieves at least `top_k` coarse candidates
@@ -116,14 +139,6 @@
 - CI: `ruff check` / `ruff format --check` now green; added a
   `workflow_dispatch`/schedule-gated `cloud_only` job with `permissions` and
   `timeout-minutes`.
-
-### Docs
-- Fixed test counts (117 pytest / 28 cargo, not 77/13) and `cloud_only` count (7, not 6).
-- Removed duplicated paragraph; removed misleading `eval/e3_result_box_2026-10-25.json` (copy of toy result).
-- Marked the 1 M box-performance numbers as uncommitted/unreproducible from this repo.
-- Added `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, `CHANGELOG.md`.
-
-### Tests
 - New regression test: `AnnIndex` rejects absurd strided shapes (no SIGABRT).
 - Removed tautological assertions in `test_config_loader.py` / `test_scaffold.py`.
 - `ContentStore.reset()` prunes only the store's own files (foreign files and

@@ -10,7 +10,7 @@ from this repo** — p50 75.562 ms, exact-id@10 0.359 (inside the pre-registered
 −0.10 budget), K=10 k. Its ledger rows were never committed to `runs.jsonl`
 (0 one-million rows today), so the job now is: **re-run the 1 M build and commit
 the ledger rows**, then the **golden question set on this exact haystack**
-(E3 §D1 “the scale story is answering”). After those two, 5 M is pure measured
+(the E3 protocol, `eval/E3_PROTOCOL.md` — “the scale story is answering”). After those two, 5 M is pure measured
 work, not a scientific gamble.
 
 The map of the whole project: [`ROADMAP.md`](ROADMAP.md).
@@ -48,7 +48,7 @@ shift — the budget is the rule.
 
 | Gate | Metric | Toy baseline | Rule at 1M |
 |---|---|---|---|
-| **G1 — ANN fidelity** | exact-id recall@10 on the 200 prefix queries (`gt.jsonl`) | coarse 0.4015 / reranked 0.2885 | must not drop more than **0.10** vs the same corpus's own baseline |
+| **G1 — ANN fidelity** | exact-id recall@10 on the 200 prefix queries (`gt.jsonl`) | coarse 0.4015 / reranked 0.2885 | must not drop more than **0.10** vs the pinned 81k reranked baseline **0.2885** (`gate.py`); a 1M baseline must be recorded before this gate is meaningful at scale |
 | **G2 — answer coverage** | target-doc recall@10 on the committed 50 questions (E3 set) | 0.740 | must not drop more than **0.10** vs 0.740 |
 | **G3 — latency** | total p50 over 200 queries | 47.7ms | ≤ **100ms** (unchanged) |
 | **G4 — relevance (noisy)** | judged precision@10 (LLM, n=10) | coarse 0.350 / reranked 0.380 | do-not-regress only — n=10 cannot gate |
@@ -61,25 +61,24 @@ Same eval set, more distractors — that is the experiment.
 
 ## The scale ladder (D2b) — what is actually reachable
 
-Memory/time model for the box (4 CPU, 32 GiB RAM, RTX Pro 6000):
+Memory/time model for the box (4 CPU, 160 GiB RAM, RTX Pro 6000):
 
 | Docs | vectors (fp32 256d) | WET download | content store | embed @2500 docs/s¹ | RAM risk |
 |---|---|---|---|---|---|
 | 81k (today) | 0.08 GB | 0.3 GB | 0.08 GB | **3.5 min** (measured, 389 docs/s) | none |
 | 1M | 1.0 GB | ~8 GB | ~1 GB | **38 min** (at today's 389 docs/s; ~10 min after 1b) | none |
-| **1M** | 1.0 GB | ~8 GB | ~1 GB | see above | none |
 | **5M** | 5.1 GB | ~40 GB | ~5 GB | see above | comfortable |
-| 10M | 10.2 GB | ~80 GB | ~10 GB | see above | comfortable (160GiB) |
-| 20M | 20.4 GB | ~160 GB | ~20 GB | see above | safe (160GiB RAM, 503GB disk) |
+| 10M | 10.2 GB | ~80 GB | ~10 GB | see above | fits on paper; outside the committed ladder |
+| 20M | 20.4 GB | ~160 GB | ~20 GB | see above | fits on paper; outside the ladder, nearest the 503GB disk budget |
 
 ¹ after item 1 — today's 442 docs/s on 3GB of a 96GB GPU leaves 5–8× on
 the table.
 
 **So: 1M is the milestone, 5M is the headline and the spec's stretch target**
-(`zenno/specs/2026-10-27-exa-home-vision-v1.md`); 10M fits on paper (table
-above) but sits outside the committed ladder, and 20M is out on this box (RAM
-and disk, not GPU). That is a "mini-Exa" worth having; web-scale stays
-explicitly out of scope.
+(`zenno/specs/2026-10-27-exa-home-vision-v1.md`). 10M and 20M fit the
+RAM/disk arithmetic on paper but sit outside the committed ladder, so they
+are not commitments; 20M is nearest the 503GB disk budget. That is a
+"mini-Exa" worth having; web-scale stays explicitly out of scope.
 
 **The latency model that matters at scale:** the ANN scans
 `nprobe × (N/K)` documents per query. At 81k/K=1024 that is 632 docs; at

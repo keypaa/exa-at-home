@@ -10,8 +10,13 @@ test run offline; the real model needs the GPU box + HF download.
 from __future__ import annotations
 
 import concurrent.futures
+import threading
 
 from .config import OPERATING_POINT, RERANKER_MODEL
+
+# Only used to lazily create a per-instance lock for objects built with
+# `Reranker.__new__` (the offline tests): the real __init__ assigns one.
+_INIT_LOCK = threading.Lock()
 
 
 class ReversingReranker:
@@ -41,6 +46,8 @@ class Reranker:
         max_pair_tokens=OPERATING_POINT["max_pair_tokens"],
         max_query_tokens=OPERATING_POINT["max_query_tokens"],
     ):
+        self._pool_lock = threading.Lock()
+        self._pool: concurrent.futures.ThreadPoolExecutor | None = None
         import torch
         from sentence_transformers import CrossEncoder
 
@@ -67,35 +74,67 @@ class Reranker:
             pairs, batch_size=self.batch_size, show_progress_bar=False
         ).tolist()
 
+    def _pool_lock_obj(self) -> threading.Lock:
+        lock = getattr(self, "_pool_lock", None)
+        if lock is None:
+            with _INIT_LOCK:
+                lock = getattr(self, "_pool_lock", None)
+                if lock is None:
+                    lock = threading.Lock()
+                    self._pool_lock = lock
+        return lock
+
+    def _executor(self) -> concurrent.futures.ThreadPoolExecutor:
+        with self._pool_lock_obj():
+            pool = getattr(self, "_pool", None)
+            if pool is None:
+                pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+                self._pool = pool
+            return pool
+
+    def _discard_pool(self, pool: concurrent.futures.ThreadPoolExecutor) -> None:
+        """Retire the pool we used, without cancelling another caller's work.
+
+        The reranker is a process-wide singleton in the server, so two
+        threads can share this pool. Cancelling queued futures here made
+        one caller's timeout silently degrade another caller's score;
+        only clear `self._pool` when it is still the pool we submitted to.
+        """
+        with self._pool_lock_obj():
+            if getattr(self, "_pool", None) is pool:
+                self._pool = None
+        try:
+            pool.shutdown(wait=False)
+        except Exception:  # noqa: BLE001, S110 — teardown is best-effort
+            pass
+
     def _score(self, query, texts, timeout_ms):
-        """Run `_score_batch` under a one-shot pool, bounded by timeout_ms.
+        """Run `_score_batch` under a reusable pool, bounded by timeout_ms.
 
         The pool is abandoned (never joined) on timeout so a slow/hung model
         call cannot keep the request hanging. Healthy calls reuse the same
         worker to avoid executor-spawn cost; a timed-out worker is replaced
-        so later queries cannot queue behind it.
+        so later queries cannot queue behind it. Pool acquire/replace is
+        locked because the server shares one reranker across threads.
         """
-        pool = getattr(self, "_pool", None)
-        if pool is None:
-            pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-            self._pool = pool
+        pool = self._executor()
         try:
             fut = pool.submit(self._score_batch, query, texts)
             return fut.result(timeout=timeout_ms / 1000)
         except Exception:  # noqa: BLE001 — any failure degrades, never raises
-            old = self._pool
-            self._pool = None
-            try:
-                if old is not None:
-                    old.shutdown(wait=False, cancel_futures=True)
-            except Exception:  # noqa: BLE001, S110 — teardown is best-effort
-                pass
+            self._discard_pool(pool)
             return None
 
     def close(self) -> None:
-        """Release the one-shot scoring executor (idempotent)."""
-        pool = getattr(self, "_pool", None)
-        self._pool = None
+        """Release the scoring executor (idempotent)."""
+        lock = getattr(self, "_pool_lock", None)
+        if lock is None:
+            pool = getattr(self, "_pool", None)
+            self._pool = None
+        else:
+            with lock:
+                pool = getattr(self, "_pool", None)
+                self._pool = None
         if pool is not None:
             try:
                 pool.shutdown(wait=False, cancel_futures=True)

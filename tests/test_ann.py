@@ -413,3 +413,55 @@ def test_ann_index_rejects_absurd_strided_shape():
         np.array([1.0, 0.0], dtype=np.float32), top_k=2
     )
     assert ids == ["a", "b"]
+
+
+def test_ann_index_rejects_view_reading_past_its_buffer():
+    """The shape cap is not a memory-safety check.
+
+    A (1, 10) view over a 4-float buffer reports a plausible shape but
+    reads 40 bytes from a 16-byte allocation. The Rust binding must
+    reject it, not copy heap bytes into the index.
+    """
+    from ann_core import AnnIndex
+
+    buf = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)
+    view = np.lib.stride_tricks.as_strided(buf, shape=(1, 10), strides=(0, 4))
+    with pytest.raises(ValueError, match="out-of-bounds|outside its"):
+        AnnIndex(view, ["x"])
+
+    # from_binary is the second entry point and had no cap at all.
+    small = np.zeros(1, dtype=np.uint8)
+    bad_codes = np.lib.stride_tricks.as_strided(small, shape=(1, 32), strides=(0, 1))
+    with pytest.raises(ValueError, match="out-of-bounds|outside its"):
+        AnnIndex.from_binary(bad_codes, ["x"])
+
+
+def test_ann_index_accepts_legitimate_noncontiguous_and_reversed_views():
+    """The extent check must not reject ordinary slices/reversals."""
+    from ann_core import AnnIndex
+
+    vecs = make_vectors(8, 4, seed=3)
+    for view in (vecs[:, ::-1], vecs[::-1], vecs[2:6]):
+        assert view.shape[1] == 4
+        idx = AnnIndex(view, [f"d{i}" for i in range(view.shape[0])])
+        idx.search(np.ascontiguousarray(view[0]), top_k=1)
+
+
+def test_ivf_load_rejects_manifest_traversal_key(tmp_path):
+    """The Rust verifier must contain manifest keys exactly like Python."""
+    from ann_core import IvfIndex
+
+    vecs = make_vectors(32, 256, seed=9)
+    index = tmp_path / "index"
+    index.mkdir()
+    _write_ivf_index(index, vecs, k=4)
+    outside = tmp_path / "outside.bin"
+    outside.write_bytes(b"secret")
+    mpath = index / "manifest.json"
+    m = json.loads(mpath.read_text())
+    from exa_home.index_format import sha256
+
+    m["files"]["../outside.bin"] = sha256(str(outside))
+    mpath.write_text(json.dumps(m))
+    with pytest.raises(ValueError, match="unsafe file key"):
+        IvfIndex.load(str(index))

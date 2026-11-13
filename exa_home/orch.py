@@ -28,6 +28,7 @@ Consumer contracts (Task 11's MCP server relies on these — keep stable):
 from __future__ import annotations
 
 import concurrent.futures
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -59,21 +60,48 @@ class DAG:
                 if d not in self.nodes:
                     raise ValueError(f"DAG: node {n.name!r} depends on unknown {d!r}")
         self._order = self._topo_sort()
-        # One reusable one-shot executor for timed nodes. A timed-out node
-        # replaces it instead of leaking a new pool per timeout (finding S4).
+        # One reusable executor for timed nodes. A timed-out node
+        # replaces it instead of leaking a new pool per timeout (finding
+        # S4). The lock matters because one DAG is shared by concurrent
+        # requests: without it two callers could build two pools, and one
+        # caller's timeout teardown could cancel the other's queued node.
         self._pool: concurrent.futures.ThreadPoolExecutor | None = None
+        self._pool_lock = threading.Lock()
 
     def _executor(self) -> concurrent.futures.ThreadPoolExecutor:
-        if self._pool is None:
-            self._pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-        return self._pool
+        with self._pool_lock:
+            if self._pool is None:
+                self._pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+            return self._pool
+
+    def _discard_pool(self, pool: concurrent.futures.ThreadPoolExecutor) -> None:
+        """Retire a timed-out pool without touching another caller's work.
+
+        Only clear `self._pool` if it is still the pool we used, and do
+        NOT cancel queued futures: another request may already have
+        submitted its node to that pool. `wait=False` leaves the stuck
+        worker abandoned, which is the documented timeout contract.
+        """
+        with self._pool_lock:
+            if self._pool is pool:
+                self._pool = None
+        try:
+            pool.shutdown(wait=False)
+        except Exception:  # noqa: BLE001, S110 — teardown is best-effort
+            pass
 
     def close(self) -> None:
         """Release the timed-node executor (idempotent)."""
-        # getattr: __init__ may have raised before _pool was assigned
-        # (e.g. the cycle-rejection path), and __del__ still runs.
-        pool = getattr(self, "_pool", None)
-        self._pool = None
+        # getattr: __init__ may have raised before _pool/_pool_lock were
+        # assigned (e.g. the cycle-rejection path), and __del__ still runs.
+        lock = getattr(self, "_pool_lock", None)
+        if lock is None:
+            pool = getattr(self, "_pool", None)
+            self._pool = None
+        else:
+            with lock:
+                pool = getattr(self, "_pool", None)
+                self._pool = None
         if pool is not None:
             try:
                 pool.shutdown(wait=False, cancel_futures=True)
@@ -110,10 +138,11 @@ class DAG:
         {"outputs" (completed + inputs so far), "spans" (incl. the failing
         node's span), "error": {node, error, type, span_ms}}. Dependents of
         a failed node never run. A node with timeout_ms set runs in a
-        one-shot worker thread and fails on timeout; the worker is
-        ABANDONED, not joined, so the timeout bounds the wall time
-        (joining it made the timeout a lie: the DAG waited the node's
-        real runtime before reporting the error).
+        reusable single-worker pool and fails on timeout; a timed-out
+        pool is retired (never joined, queued work not cancelled) so the
+        timeout bounds the wall time without disturbing concurrent
+        callers, and later nodes get a fresh worker instead of queueing
+        behind the stuck one.
         """
         outputs = dict(inputs)
         spans: dict[str, float] = {}
@@ -130,14 +159,11 @@ class DAG:
                         fut = pool.submit(node.fn, snap)
                         outputs[name] = fut.result(timeout=node.timeout_ms / 1000)
                     except concurrent.futures.TimeoutError:
-                        # The worker may still be running. Replace the pool
-                        # (never join) so later queries cannot queue behind
-                        # it, and so timed-out calls do not leak one thread
-                        # per timeout (finding S4).
-                        self.close()
-                        raise
-                    except Exception:
-                        # A normal node failure leaves the pool healthy.
+                        # The worker may still be running. Retire this pool
+                        # (never join, never cancel) so later queries get a
+                        # fresh worker and concurrent callers' queued nodes
+                        # still run (finding S4).
+                        self._discard_pool(pool)
                         raise
             except Exception as e:  # noqa: BLE001 — failure is data here
                 dt_ms = (time.perf_counter() - t0) * 1000

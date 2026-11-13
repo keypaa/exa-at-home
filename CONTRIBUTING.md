@@ -15,7 +15,7 @@ pip install -e .[dev]
 export PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1   # Python 3.14 + PyO3 0.22
 cd crates/ann-core && maturin develop && cd ../..
 python -m pytest tests/ -m "not cloud_only" -q   # 118 passed
-cargo test -p ann-core                            # 28 passed
+cargo test -p ann-core                            # 29 passed
 ```
 
 Python 3.14+ requires `PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1` because the

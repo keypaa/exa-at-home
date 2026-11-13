@@ -180,3 +180,52 @@ def test_real_index_under_100ms_budget():
         check=False,
     )
     assert r.returncode == 0, f"stdout:\n{r.stdout}\nstderr:\n{r.stderr}"
+
+
+def test_latency_defaults_come_from_operating_point(monkeypatch):
+    """C4: the CLI must measure the shipped operating point by default."""
+    import scripts.e2e_latency as e2e
+    from exa_home.config import OPERATING_POINT
+
+    seen = {}
+
+    def fake_build(*args, **kwargs):
+        seen.update(kwargs)
+        return object()
+
+    def fake_run(dag, queries, k, verbose=False):
+        return {
+            "n": len(queries),
+            "stages": {s: [1.0] for s in e2e.STAGE_ORDER},
+            "breakdown": {},
+            "total": [1.0],
+            "violations": [],
+            "top_ids": [],
+        }
+
+    monkeypatch.setattr(e2e, "build_real_dag", fake_build)
+    monkeypatch.setattr(e2e, "run_latency", fake_run)
+    rc = e2e.main(["--ann", "ivf", "--index", "unused", "--synth-queries", "1"])
+    assert rc == 0
+    assert seen["max_pair_tokens"] == OPERATING_POINT["max_pair_tokens"]
+    assert seen["batch_size"] == OPERATING_POINT["batch_size"]
+
+
+def test_run_latency_excludes_two_warmup_queries(monkeypatch):
+    """C13: cold-start queries must not enter the percentiles."""
+    import scripts.e2e_latency as e2e
+
+    calls = []
+
+    def fake_run_search(dag, query, filters, top_k, profile=False):
+        calls.append(query)
+        prof = {s: 1.0 for s in e2e.STAGE_ORDER}
+        prof["total_ms"] = float(len(e2e.STAGE_ORDER))
+        return {"profile": prof, "results": [], "degraded": False}
+
+    monkeypatch.setattr("exa_home.orch.run_search", fake_run_search)
+    queries = [{"query": f"q{i}", "filters": {}} for i in range(5)]
+    stats = e2e.run_latency(object(), queries, k=10)
+    assert len(calls) == 7, f"expected 2 warmup + 5 measured calls, got {len(calls)}"
+    assert calls[:2] == ["q0", "q1"]
+    assert stats["n"] == 5 and len(stats["total"]) == 5

@@ -256,3 +256,57 @@ def test_dag_rejects_cycles_and_unknown_deps():
         DAG([Node("a", lambda _: 1, ["b"]), Node("b", lambda _: 1, ["a"])])
     with pytest.raises(ValueError, match="unknown"):
         DAG([Node("a", lambda _: 1, ["nope"])])
+
+
+def test_dag_pool_is_created_once_under_concurrency():
+    """One DAG is shared by concurrent requests: pool creation is locked."""
+    import threading
+
+    dag = DAG([])
+    pools = []
+    barrier = threading.Barrier(16)
+
+    def grab():
+        barrier.wait()
+        pools.append(dag._executor())
+
+    threads = [threading.Thread(target=grab) for _ in range(16)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len({id(p) for p in pools}) == 1, "concurrent callers built multiple pools"
+    dag.close()
+
+
+def test_dag_discarding_a_timed_out_pool_does_not_cancel_queued_work():
+    """One caller's timeout must not cancel another caller's queued node.
+
+    The old timeout path called `close()`, whose `cancel_futures=True`
+    cancelled futures another request had already submitted to the same
+    pool, spuriously failing that request.
+    """
+    import threading
+
+    dag = DAG([])
+    pool = dag._executor()
+    gate = threading.Event()
+
+    def queued():
+        gate.wait(2)
+        return "ran"
+
+    fut = pool.submit(queued)
+    dag._discard_pool(pool)  # simulate a timeout in another caller
+    gate.set()
+    assert fut.result(timeout=2) == "ran"
+    assert dag._pool is None, "discarded pool stayed installed"
+    dag.close()
+
+
+def test_dag_close_is_idempotent_and_safe_after_partial_init():
+    dag = DAG([])
+    dag.close()
+    dag.close()
+    # __init__ may raise before _pool/_pool_lock exist; __del__ still runs.
+    DAG.__new__(DAG).close()

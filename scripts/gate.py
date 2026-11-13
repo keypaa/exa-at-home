@@ -24,6 +24,9 @@ sys.path.insert(0, str(ROOT))
 
 
 # ---- thresholds (pinned; change only by ADR) ------------------------------
+# G1's baseline is the 81k toy reranked recall. It is NOT the current corpus's
+# own baseline: record a 1M baseline before treating G1 as a scale gate.
+G1_BASELINE = 0.2885
 G2_BASELINE = 0.740
 G1_DROP_BUDGET = 0.10
 G2_DROP_BUDGET = 0.10
@@ -143,6 +146,25 @@ def gate_synthetic(n_docs: int, k: int, budget_ms: float, verbose: bool = False)
     return results
 
 
+def _g2_status(have_e3: bool, run_g2_e3: bool) -> dict:
+    """G2's skip/pass status before the result file is evaluated.
+
+    "skipped" means NOT MEASURED. `--run-g2-e3` without a result file used
+    to leave skipped=False and pass=None, so the gate could pass with G2
+    neither measured nor listed in skipped_gates.
+    """
+    if have_e3:
+        return {"skipped": False, "skip_reason": None}
+    return {
+        "skipped": True,
+        "skip_reason": (
+            "run-g2-e3 requested but no e3 result file"
+            if run_g2_e3
+            else "no --e3-result / not --run-g2-e3"
+        ),
+    }
+
+
 def gate_real(
     index_dir,
     queries,
@@ -193,9 +215,9 @@ def gate_real(
         pred_rows = _jsonl(pred)
         recall, _skipped = recall_at_10(gt_rows, pred_rows)
         g1["reranked"] = round(recall, 4) if recall is not None else None
-        g1["baseline"] = 0.2885
-        g1["limit"] = 0.2885 - G1_DROP_BUDGET
-        g1["pass"] = recall is not None and recall >= 0.2885 - G1_DROP_BUDGET
+        g1["baseline"] = G1_BASELINE
+        g1["limit"] = G1_BASELINE - G1_DROP_BUDGET
+        g1["pass"] = recall is not None and recall >= G1_BASELINE - G1_DROP_BUDGET
     if pred16:
         from scripts.measure_recall import recall_at_10
 
@@ -206,13 +228,9 @@ def gate_real(
     g1.setdefault("baseline_coarse_limit", 0.4015 - G1_DROP_BUDGET)
 
     # --- G2 answer coverage ---
-    g2 = {
-        "skipped": not (os.path.exists(e3_result_path or "") or run_g2_e3),
-        "skip_reason": "no --e3-result / not --run-g2-e3"
-        if not (os.path.exists(e3_result_path or "") or run_g2_e3)
-        else None,
-    }
-    if os.path.exists(e3_result_path or ""):
+    have_e3 = os.path.exists(e3_result_path or "")
+    g2 = _g2_status(have_e3, run_g2_e3)
+    if have_e3:
         r = json.loads(Path(e3_result_path).read_text())
         coarse = r.get("coarse_recall10")
         reranked = r.get("reranked_recall10")
@@ -281,7 +299,12 @@ def main(argv=None):
         help="attempt G2 live (requires index/store)",
     )
     ap.add_argument("--budget-ms", type=float, default=G3_BUDGET_MS)
-    ap.add_argument("--ledger", default="runs.jsonl", help="append one full-config row")
+    ap.add_argument(
+        "--ledger",
+        default=None,
+        help="append one full-config row to this ledger (default: none; "
+        "pass runs.jsonl explicitly for a real measurement)",
+    )
     ap.add_argument("--json", action="store_true", help="emit JSON only")
     a = ap.parse_args(argv)
 
@@ -342,7 +365,7 @@ def main(argv=None):
     else:
         passed = res.get("hard_gates_pass", True)
     # no input data at all -> usage-ish
-    if a.synth is False and not res.get("G3_latency", {}).get("p50_ms"):
+    if a.synth is False and res.get("G3_latency", {}).get("p50_ms") is None:
         print("gate: no measurement taken", file=sys.stderr)
         return 2
 

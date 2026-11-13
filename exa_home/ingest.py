@@ -50,8 +50,11 @@ def _title_from_url(url: str) -> str:
     if not tail:
         return ""
     base = "".join(ch for ch in tail if ch.isprintable()).rsplit(".", 1)[0]
-    parts = [p for p in base.replace("_", " ").replace("-", " ").split() if p]
-    if not parts or parts == [base] and len(base) > 60:
+    # A percent-encoded separator (`foo%2Fbar.html`) decodes to "/" and
+    # must split words like the literal separators, not produce "Foo/bar".
+    spaced = base.replace("_", " ").replace("-", " ").replace("/", " ")
+    parts = [p for p in spaced.split() if p]
+    if not parts or (parts == [base] and len(base) > 60):
         return ""
     return " ".join(part[:1].upper() + part[1:] for part in parts)
 

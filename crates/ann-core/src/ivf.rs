@@ -71,6 +71,10 @@ pub fn search_lists(
     // Keep only the top `n_coarse` via a bounded selection instead of sorting
     // every scanned candidate (finding R4): O(scanned) + O(n_coarse log
     // n_coarse) instead of O(scanned log scanned).
+    //
+    // Tie contract: equal scores are UNORDERED. `select_nth_unstable_by`
+    // does not preserve scan order among ties (the old sort+truncate did),
+    // so callers must not depend on the relative order of equal scores.
     if scored.len() > n_coarse {
         scored.select_nth_unstable_by(n_coarse, |a, b| crate::cmp_desc(a.1, b.1));
         scored.truncate(n_coarse);
@@ -125,6 +129,25 @@ mod tests {
         let q = vec![f32::NAN; 4];
         let got = search_lists(&lists, &codes, &[0, 1], &q, 10, None);
         assert_eq!(got.len(), 2);
+    }
+
+    #[test]
+    fn search_lists_bounds_to_n_coarse_with_the_best_scores() {
+        // R4: a bounded selection must keep exactly the best n_coarse
+        // candidates (the old sort+truncate did; the contract is pinned).
+        let codes = packed(&[
+            [1.0, 1.0, 1.0, 1.0],
+            [1.0, 1.0, 1.0, -1.0],
+            [1.0, 1.0, -1.0, -1.0],
+            [1.0, -1.0, -1.0, -1.0],
+            [-1.0, -1.0, -1.0, -1.0],
+        ]);
+        let lists = vec![vec![0, 1, 2, 3, 4]];
+        let q = vec![1.0; 256][..4].to_vec();
+        let got = search_lists(&lists, &codes, &[0], &q, 2, None);
+        assert_eq!(got.len(), 2);
+        assert_eq!(got.iter().map(|(i, _)| *i).collect::<Vec<_>>(), vec![0, 1]);
+        assert!(got[0].1 >= got[1].1);
     }
 
     #[test]

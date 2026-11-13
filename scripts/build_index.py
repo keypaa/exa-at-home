@@ -96,7 +96,14 @@ def same_source(recorded: dict | None, current: dict) -> bool:
         return False
     return all(
         recorded.get(key) == current.get(key)
-        for key in ("docs_size", "vecs_size", "vecs_sha256", "ids_size", "ids_sha256")
+        for key in (
+            "docs_size",
+            "docs_sha256",
+            "vecs_size",
+            "vecs_sha256",
+            "ids_size",
+            "ids_sha256",
+        )
     )
 
 
@@ -183,6 +190,11 @@ def main(
     progress_every: int = 100_000,
     reset_store: bool = True,
 ) -> dict:
+    if no_store and store is not None:
+        # Contradictory request: "do not build a store" but "use this
+        # store". Pruning a user-supplied path silently would be worse, and
+        # failing after writing index files would leave a half-built dir.
+        raise ValueError("--no-store cannot be combined with --store")
     import numpy as np
 
     from exa_home.index_format import (
@@ -233,7 +245,7 @@ def main(
         # notice (the store is off-manifest by design). Prune the derived
         # default location so the dir cannot outlive its index.
         stale_store = os.path.join(out, "store")
-        if store is None and os.path.isdir(stale_store):
+        if os.path.isdir(stale_store):
             pruned = ContentStore(stale_store).reset()
             if verbose and pruned:
                 print(f"[store] pruned {pruned} stale file(s)", flush=True)
@@ -309,8 +321,9 @@ if __name__ == "__main__":
         dest="reset_store",
         action="store_false",
         help=(
-            "append to an existing content store instead of rebuilding it "
-            "(the store is derived data; rebuild is the default)"
+            "keep an existing content store's shard bytes instead of "
+            "rebuilding them; offsets are still rewritten for the new "
+            "corpus (the store is derived data; rebuild is the default)"
         ),
     )
     ap.add_argument(

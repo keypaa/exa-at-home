@@ -21,6 +21,11 @@ QUESTIONS = ROOT / "eval" / "questions_toy_20261021.json"
 TARGETS = ROOT / "eval" / "sampled_targets.json"
 
 
+def _ratio(hits: int, n: int) -> float:
+    """hits/n, with an empty question set defined as 0.0 (not ZeroDivision)."""
+    return hits / n if n else 0.0
+
+
 def targets_path_for(docs: Path, fingerprint: str = "") -> Path:
     """One target set per CORPUS, not per file name.
 
@@ -63,34 +68,28 @@ def validate_docs_for_index(docs: Path, index_dir: Path) -> str:
     """
     from scripts.build_index import read_source
 
+    if not docs.is_file():
+        raise ValueError(f"{docs} does not exist; pass --docs <corpus.jsonl>")
     src = read_source(str(index_dir))
     got = docs_fingerprint(docs)
     if not src:
-        print(
-            f"warning: {index_dir} has no source provenance; "
-            "cannot validate --docs against it",
-            file=sys.stderr,
+        raise ValueError(
+            f"{index_dir} has no source provenance; cannot prove {docs} is "
+            "the corpus this index was built from (rebuild the index)"
         )
-        return got
     want = src.get("docs_sha256")
-    if want:
-        if got != want:
-            raise ValueError(
-                f"{docs} does not match the corpus {index_dir} was built from "
-                f"(docs sha256 {got[:12]} != {want[:12]})"
-            )
-        return got
-    # Legacy index written before docs hashing: only size is available.
-    want_size = src.get("docs_size")
-    if want_size is not None and os.path.getsize(docs) != want_size:
+    if not want:
+        # A size-only check lets a same-size foreign corpus through, which
+        # defeats the point of provenance. Fail closed instead.
+        raise ValueError(
+            f"{index_dir} predates docs hashing (no docs_sha256); rebuild "
+            "the index before running E3"
+        )
+    if got != want:
         raise ValueError(
             f"{docs} does not match the corpus {index_dir} was built from "
-            f"(size {os.path.getsize(docs)} != {want_size})"
+            f"(docs sha256 {got[:12]} != {want[:12]})"
         )
-    print(
-        "warning: index provenance predates docs hashing; only size checked",
-        file=sys.stderr,
-    )
     return got
 
 
@@ -177,7 +176,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     Qdoc = ensure_questions(root)
     QQ = Qdoc["questions"]
-    Q = [{"question": q["question"], "target_id": targets[q["n"]]["id"]} for q in QQ]
+    Q = []
+    for q in QQ:
+        n = q.get("n")
+        if not isinstance(n, int) or not 0 <= n < len(targets):
+            raise SystemExit(
+                f"run_e3: question target index {n!r} is outside the "
+                f"{len(targets)} sampled targets"
+            )
+        Q.append({"question": q["question"], "target_id": targets[n]["id"]})
     print(f"questions: {len(Q)} (targets by index from sampled_targets.json)")
 
     emb = Embedder()
@@ -239,8 +246,8 @@ def main(argv: list[str] | None = None) -> int:
 
     result = {
         "rows": rows,
-        "coarse_recall10": c_hit / n,
-        "reranked_recall10": r_hit / n,
+        "coarse_recall10": _ratio(c_hit, n),
+        "reranked_recall10": _ratio(r_hit, n),
         "coarse_mrr10": c_mrr,
         "reranked_mrr10": r_mrr,
         "wins": wins,

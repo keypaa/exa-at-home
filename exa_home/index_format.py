@@ -9,6 +9,11 @@ tampering of the files it names) but not an AUTHENTICITY check — a caller
 who can replace index files can replace manifest.json to match. Serving an
 index from an untrusted location therefore requires an out-of-band trust
 anchor (e.g. a signature verified by `verify_manifest_signature`).
+
+`verify_manifest_signature` is a PYTHON hook: `verify_manifest()` runs it,
+but the Rust serving loader (`IvfIndex.load`) does not. Call
+`verify_manifest()` before `IvfIndex.load()` when authenticity matters;
+the Rust loader alone gives integrity only.
 """
 
 from __future__ import annotations
@@ -102,6 +107,11 @@ def _manifest_entries(index_dir: str, prefix: str = "") -> dict:
     for name in sorted(os.listdir(index_dir)):
         if name == MANIFEST and not prefix:
             continue
+        # centroids.npy is the K-means OUTPUT consumed to write
+        # centroids.f32; it is not read at serve time. Covering it made a
+        # later cleanup of that build artifact fail verify_manifest.
+        if name == "centroids.npy" and not prefix:
+            continue
         full = os.path.join(index_dir, name)
         rel = f"{prefix}{name}"
         if os.path.isdir(full):
@@ -142,6 +152,11 @@ def verify_manifest_signature(index_dir: str, manifest: dict) -> None:
     digest here and raise ValueError on failure. The hook receives the
     parsed manifest so a real implementation can bind the signature to its
     content.
+
+    NOTE: this hook runs from the Python `verify_manifest()` only. The
+    Rust serving loader performs its own integrity check and never calls
+    back into Python, so a server that loads via `IvfIndex.load` must run
+    `verify_manifest()` first if it needs this trust anchor.
     """
     return
 
@@ -188,8 +203,17 @@ def verify_manifest(index_dir: str) -> dict:
                 raise ValueError(
                     f"{MANIFEST} has no checksum for {name} (required filter file)"
                 )
+    root = os.path.realpath(index_dir)
     for name, want in files.items():
-        got = sha256(os.path.join(index_dir, name))
+        # A crafted key ("../../etc/passwd", absolute, or a symlink out of
+        # the index) must not make the verifier read and hash a file
+        # outside the index — the error message alone leaks 12 hex chars.
+        resolved = os.path.realpath(os.path.join(root, name))
+        if os.path.isabs(name) or not (
+            resolved == root or resolved.startswith(root + os.sep)
+        ):
+            raise ValueError(f"{MANIFEST}: unsafe file key {name!r}")
+        got = sha256(resolved)
         if got != want:
             raise ValueError(
                 f"corrupt index file {name}: want {want[:12]} got {got[:12]}"

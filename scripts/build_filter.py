@@ -189,7 +189,7 @@ def main(
     out: str,
     max_terms: int,
     verbose: bool = False,
-    progress_every: int = 50_000,
+    progress_every: int = 100_000,
 ):
     """docs.jsonl -> filter/. The corpus is streamed (never a list)."""
     from scripts.jsonl import JsonlFile

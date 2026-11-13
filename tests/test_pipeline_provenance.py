@@ -3,6 +3,7 @@
 # Each stage used to reuse an artifact merely because the file existed, so
 # files from a different crawl were consumed silently. These tests pin the
 # input-identity checks and the sidecars they read.
+import gzip
 import json
 
 import numpy as np
@@ -38,15 +39,17 @@ def test_stage_download_rejects_foreign_file_set(tmp_path, monkeypatch):
     out = tmp_path / "wet"
     out.mkdir()
     # Same COUNT as requested, wrong NAMES (the old `have >= len(urls)` skip).
-    (out / "b.wet.gz").write_bytes(b"stale-b")
-    (out / "c.wet.gz").write_bytes(b"stale-c")
+    (out / "b.wet.gz").write_bytes(gzip.compress(b"stale-b"))
+    (out / "c.wet.gz").write_bytes(gzip.compress(b"stale-c"))
 
     calls = []
 
     def fake_download(urls_path, out_dir, workers):
         calls.append((urls_path, out_dir, workers))
         for name in ("a.wet.gz", "b.wet.gz"):
-            (tmp_path / "wet" / name).write_bytes(b"fresh-" + name.encode())
+            (tmp_path / "wet" / name).write_bytes(
+                gzip.compress(b"fresh-" + name.encode())
+            )
 
     monkeypatch.setattr("scripts.download_wet.main", fake_download)
 
@@ -54,7 +57,7 @@ def test_stage_download_rejects_foreign_file_set(tmp_path, monkeypatch):
 
     assert calls, "foreign file set was reused instead of re-downloading"
     assert not (out / "c.wet.gz").exists(), "foreign WET file survived"
-    assert (out / "a.wet.gz").read_bytes() == b"fresh-a.wet.gz"
+    assert gzip.decompress((out / "a.wet.gz").read_bytes()) == b"fresh-a.wet.gz"
 
     # Now the directory matches the URL set: a second call reuses it.
     calls.clear()
@@ -196,3 +199,107 @@ def test_stage_queries_regenerates_when_one_artifact_missing(tmp_path, missing):
     res = pipe.stage_queries(str(dpath), str(vpath), str(ipath), 2, **kwargs)
     assert res.get("reused") is not True
     assert qpath.is_file() and gtpath.is_file()
+
+
+def test_stage_download_rejects_corrupt_but_nonempty_file(tmp_path, monkeypatch):
+    """A truncated gzip must be re-downloaded, not reused (C9 bypass)."""
+    urls = tmp_path / "wet_urls.txt"
+    urls.write_text("https://data.commoncrawl.org/crawl/a.wet.gz\n")
+    out = tmp_path / "wet"
+    out.mkdir()
+    (out / "a.wet.gz").write_bytes(gzip.compress(b"x" * 100)[:20])  # truncated
+
+    calls = []
+
+    def fake_download(urls_path, out_dir, workers):
+        calls.append(urls_path)
+        (tmp_path / "wet" / "a.wet.gz").write_bytes(gzip.compress(b"fresh"))
+
+    monkeypatch.setattr("scripts.download_wet.main", fake_download)
+    pipe.stage_download(str(urls), str(out), workers=1)
+    assert calls, "corrupt non-empty file was reused"
+    assert gzip.decompress((out / "a.wet.gz").read_bytes()) == b"fresh"
+
+
+def test_stage_download_force_prunes_foreign_files(tmp_path, monkeypatch):
+    urls = tmp_path / "wet_urls.txt"
+    urls.write_text("https://data.commoncrawl.org/crawl/a.wet.gz\n")
+    out = tmp_path / "wet"
+    out.mkdir()
+    (out / "foreign.wet.gz").write_bytes(gzip.compress(b"other"))
+    (out / "a.wet.gz").write_bytes(gzip.compress(b"old"))
+
+    def fake_download(urls_path, out_dir, workers):
+        (tmp_path / "wet" / "a.wet.gz").write_bytes(gzip.compress(b"new"))
+
+    monkeypatch.setattr("scripts.download_wet.main", fake_download)
+    pipe.stage_download(str(urls), str(out), workers=1, force=True)
+    assert not (out / "foreign.wet.gz").exists(), "force skipped the prune"
+
+
+def test_wet_fingerprint_detects_same_size_rewrite(tmp_path):
+    """mtime+size is not provenance: a same-size rewrite must invalidate."""
+    import os
+
+    wet = tmp_path / "wet"
+    wet.mkdir()
+    path = wet / "seg.wet.gz"
+    path.write_bytes(b"AAAA")
+    first = pipe._wet_fingerprint(str(wet))
+    st = path.stat()
+    path.write_bytes(b"BBBB")
+    os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns))
+    assert pipe._wet_fingerprint(str(wet)) != first
+
+
+def test_stage_ingest_refuses_empty_wet_and_keeps_docs(tmp_path):
+    wet = tmp_path / "wet"
+    wet.mkdir()
+    make_wet_gz(str(wet / "seg.wet.gz"), _long_docs(0, 2))
+    docs = tmp_path / "docs.jsonl"
+    pipe.stage_ingest(str(wet), str(docs), verbose=False, progress_every=0)
+    original = docs.read_bytes()
+    assert original
+
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    with pytest.raises(ValueError, match="no WET files"):
+        pipe.stage_ingest(str(empty), str(docs), verbose=False, progress_every=0)
+    assert docs.read_bytes() == original, "empty WET dir destroyed the corpus"
+
+
+def test_stage_index_trains_centroids_inside_the_index_dir(tmp_path, monkeypatch):
+    """C15: centroids.npy must land under <out>, not the process cwd."""
+    import numpy as np
+
+    vecs = tmp_path / "vecs.npy"
+    ids = tmp_path / "ids.json"
+    docs = tmp_path / "docs.jsonl"
+    np.save(vecs, np.zeros((2, 256), dtype=np.float32))
+    ids.write_text(json.dumps(["a", "b"]))
+    docs.write_text(
+        "\n".join(
+            json.dumps({"id": d, "text": "body " + "x" * 100}) for d in ("a", "b")
+        )
+        + "\n"
+    )
+    out = tmp_path / "index"
+    seen = {}
+
+    def fake_train(vecs_path, k, sample, out_path, verbose=False):
+        seen["centroids"] = out_path
+        np.save(out_path, np.zeros((k, 256), dtype=np.float32))
+
+    def fake_build(vecs_path, ids_path, cent_path, docs_path, out_path, **kwargs):
+        seen["build_centroids"] = cent_path
+
+    monkeypatch.setattr("scripts.train_centroids.main", fake_train)
+    monkeypatch.setattr("scripts.build_index.main", fake_build)
+    monkeypatch.setattr(
+        "exa_home.index_format.verify_manifest",
+        lambda _out: {"n_docs": 2, "n_centroids": 2},
+    )
+
+    pipe.stage_index(str(vecs), str(ids), str(docs), str(out), k=2, sample=2)
+    assert seen["centroids"] == str(out / "centroids.npy")
+    assert seen["build_centroids"] == seen["centroids"]

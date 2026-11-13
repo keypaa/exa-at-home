@@ -42,6 +42,11 @@ class ContentStore:
         # id -> (shard_path, byte_offset, record_length, digest) index. Built
         # lazily on first miss (or loaded from store/offsets.json).
         self._index: dict[str, Entry] | None = None
+        # ids whose offsets entry was downgraded to "no digest" while the
+        # rest of the file carries digests. Such a mixed file is treated
+        # as tampering: those ids are never served (fail closed), instead
+        # of falling back to the legacy trust-the-bytes path.
+        self._untrusted_ids: set[str] = set()
         # shard_path -> byte size the index was built from (None = unknown,
         # e.g. a legacy offsets.json without record lengths).
         self._shard_sizes: dict[str, int | None] = {}
@@ -113,20 +118,25 @@ class ContentStore:
         nothing else detects that drift. Returns the number of files
         removed.
 
-        Safety: only files this store created are deleted — `shard-*.jsonl`
-        and `offsets.json` sitting directly under `root`. Anything else in
-        the directory (user files, nested dirs) is left untouched, and the
-        in-memory state is invalidated so no read can serve a record whose
-        bytes are about to disappear.
+        Safety: deletion is name-scoped — any `shard-*.jsonl` or
+        `offsets.json` directly under `root` is removed, so do not point a
+        store at a directory that holds files with those names for another
+        purpose. Anything else (user files, nested dirs) is left untouched,
+        and the in-memory state is invalidated so no read can serve a
+        record whose bytes are about to disappear.
         """
         removed = 0
         with self._lock:
             self._close_bulk()
             self._index = None
+            self._untrusted_ids = set()
             self._shard_sizes = {}
-            self._shard_locks = {}
+            # Keep `_shard_locks`: an in-flight scan may still hold one,
+            # and clearing the map would let a second scan create a second
+            # lock for the same shard.
             self._lru.clear()
             self._lru_used = 0
+            self.stats = {"hits": 0, "misses": 0, "scan_bytes": 0}
             if not os.path.isdir(self.root):
                 return 0
             root = os.path.normpath(self.root)
@@ -159,6 +169,7 @@ class ContentStore:
                 with open(path, "ab") as f:
                     off = f.tell()
                     f.write(payload)
+            self._untrusted_ids.discard(doc["id"])
             if self._index is None:
                 return
             self._index[doc["id"]] = (path, off, len(payload), digest)
@@ -195,6 +206,8 @@ class ContentStore:
         if not isinstance(serial, dict):
             return False
         idx: dict[str, Entry] = {}
+        any_digest = False
+        any_missing_digest = False
         for doc_id, loc in serial.items():
             if not isinstance(loc, (list, tuple)) or len(loc) < 2:
                 continue
@@ -209,6 +222,10 @@ class ContentStore:
                 )
             except (ValueError, TypeError):
                 continue
+            if digest is None:
+                any_missing_digest = True
+            else:
+                any_digest = True
             # Contain the shard path under self.root: an attacker-controlled
             # offsets.json must not be able to read files outside the store
             # (absolute path or ".." traversal). See finding S2.
@@ -221,6 +238,16 @@ class ContentStore:
             ):
                 continue
             idx[str(doc_id)] = (resolved, off, length, digest)
+        if any_digest and any_missing_digest:
+            # Partial downgrade: refuse the entries whose digest column was
+            # stripped while others kept theirs. Dropping them from the
+            # index alone is not enough — a miss would rescan and trust the
+            # substituted bytes — so they are also marked unservable.
+            self._untrusted_ids = {
+                doc_id for doc_id, entry in idx.items() if entry[3] is None
+            }
+            for doc_id in self._untrusted_ids:
+                del idx[doc_id]
         self._index = idx
         self._shard_sizes = self._sizes_from_index(idx)
         return True
@@ -297,6 +324,7 @@ class ContentStore:
                 except OSError:
                     start = 0
             new_entries: list[tuple[str, Entry]] = []
+            seen_ids: set[str] = set()
             scanned = 0
             if os.path.exists(path):
                 with open(path, "rb") as f:
@@ -313,9 +341,17 @@ class ContentStore:
                             continue
                         if isinstance(d, dict) and "id" in d:
                             doc_id = d["id"]
+                            seen_ids.add(doc_id)
                             digest = hashlib.sha256(line).hexdigest()
                             new_entries.append((doc_id, (path, off, len(line), digest)))
             with self._lock:
+                if force_full:
+                    # The shard was rebuilt/truncated: ids that are no longer
+                    # in it must not keep a stale offset, or every later get
+                    # re-runs this full scan (a miss storm at 1M scale).
+                    for existing_id, entry in list(self._index.items()):
+                        if entry[0] == path and existing_id not in seen_ids:
+                            del self._index[existing_id]
                 for doc_id, entry in new_entries:
                     existing = self._index.get(doc_id)
                     if (
@@ -359,7 +395,21 @@ class ContentStore:
         try:
             with open(path, "rb") as f:
                 f.seek(off)
-                line = f.readline()
+                if length is None:
+                    # Legacy offsets entry: no recorded length to bound the
+                    # read. (New entries always take the bounded branch.)
+                    line = f.readline()
+                else:
+                    # Bound the allocation: a tampered huge line must not
+                    # become a memory blow-up just because we know its
+                    # recorded length. Read one extra byte only to prove
+                    # the record boundary, then discard it.
+                    chunk = f.read(length + 1)
+                    line = chunk[:length]
+                    if len(chunk) < length or (
+                        len(chunk) > length and not line.endswith(b"\n")
+                    ):
+                        return None, "short"
         except OSError:
             return None, "io"
         if not line:
@@ -418,9 +468,21 @@ class ContentStore:
         # 2) Index lookup. A miss may be a newly appended doc: scan that
         # shard's tail once (per-shard lock prevents duplicate scans).
         self._ensure_index()
+        if doc_id in self._untrusted_ids:
+            # A mixed offsets.json stripped this entry's digest while
+            # keeping others: fail closed rather than trust the bytes.
+            with self._lock:
+                self.stats["misses"] += 1
+            return None
         loc = self._get_locked_entry(doc_id)
         if loc is None:
-            self._scan_shard(self._shard(doc_id), preserve_known=True)
+            # Only pay for a rescan when the shard actually changed. The
+            # unconditional scan made every miss re-read a whole shard
+            # (1.5-2.5 ms at 81k, ~90 ms at 1M); `_shard_changed` is the
+            # gate that used to prevent it.
+            path = self._shard(doc_id)
+            if self._shard_changed(path):
+                self._scan_shard(path, preserve_known=True)
             loc = self._get_locked_entry(doc_id)
             if loc is None:
                 with self._lock:

@@ -180,11 +180,20 @@ def test_mcp_tool_wrapper_redacts_internal_errors():
     assert "passwd" not in str(res)
 
     def bad_request(_x):
-        raise ValueError("query must be non-empty")
+        from exa_home.mcp_server import InvalidRequest
+
+        raise InvalidRequest("query must be non-empty")
 
     res = _safe_tool(bad_request)(1)
     assert res["error"]["code"] == "invalid_request"
     assert res["error"]["message"] == "query must be non-empty"
+
+    # A plain ValueError may come from a backend and must stay redacted.
+    def backend_value_error(_x):
+        raise ValueError("numpy shape (3, 256) at /var/secret")
+
+    res = _safe_tool(backend_value_error)(1)
+    assert res == {"error": {"code": "internal", "message": "internal error"}}
 
 
 def test_home_contents_marks_corpus_text_untrusted_and_strips_controls():
@@ -239,7 +248,7 @@ def test_home_search_redacts_backend_error_internals():
 
     wire(FakeEmbedder(), ExplodingANN(), FakeReranker(), FakeStore(make_docs()))
     res = home_search("q")
-    assert res["error"] == {"error": "internal error (see server logs)"}
+    assert res["error"] == {"code": "internal", "message": "internal error"}
     assert "node" not in res["error"] and "type" not in res["error"]
 
 
@@ -292,3 +301,47 @@ def test_main_help_documents_auth_and_bind_flags():
     assert r.returncode == 0, r.stderr
     for flag in ("--host", "--token", "--rate-limit", "--config"):
         assert flag in r.stdout, flag
+
+
+def test_check_bearer_accepts_rfc7235_variants_and_non_ascii():
+    from exa_home.mcp_server import _check_bearer
+
+    assert _check_bearer("bearer s3cret", "s3cret")
+    assert _check_bearer("BEARER   s3cret", "s3cret")
+    # A non-ASCII credential must be a clean False, not a TypeError/500.
+    assert not _check_bearer("Bearer tökén", "s3cret")
+    assert not _check_bearer("Basic s3cret", "s3cret")
+
+
+def test_http_transport_reaches_asgi_auth_and_rate_limit():
+    """The documented HTTP command must actually start and enforce auth.
+
+    Regression: passing a FastMCP middleware instance to `http_app`
+    raised TypeError on the first request, so every HTTP call 500'd.
+    """
+    from starlette.middleware import Middleware
+    from starlette.testclient import TestClient
+
+    from exa_home.mcp_server import _auth_middleware_class, _get_app
+
+    app = _get_app()
+    http_app = app.http_app(
+        middleware=[
+            Middleware(_auth_middleware_class(), token="t", rate_limit=2),
+        ]
+    )
+    with TestClient(http_app) as client:
+        assert client.get("/mcp").status_code == 401
+        headers = {"Authorization": "Bearer t"}
+        assert client.get("/mcp", headers=headers).status_code != 401
+        assert client.get("/mcp", headers=headers).status_code != 429
+        assert client.get("/mcp", headers=headers).status_code == 429
+
+
+def test_bad_filter_is_invalid_request_not_internal():
+    from exa_home.mcp_server import _safe_tool, home_search
+
+    wire_mcp()
+    result = _safe_tool(home_search)("neural search", {"bogus": ["x"]})
+    assert result["error"]["code"] == "invalid_request"
+    assert "unknown filter key" in result["error"]["message"]

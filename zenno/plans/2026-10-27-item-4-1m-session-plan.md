@@ -59,7 +59,7 @@ Before pasting, these four must hold or the session is a *measurement*, not a pu
   does): there is no "golden" script. If one is needed, add it in this same session.
 
 ## Cost model (one page)
-- 130 WET × 1.3MB ≈ 170 MB downloaded.
+- 130 WET × ~62 MB ≈ 8 GB downloaded (RUNBOOK: 1M ≈ 8 GB).
 - 81k docs in ~4 WET → 1.04M at ~26×; fits the 503 GB disk and 160 GB RAM
   with margin.
 - Embed wall-clock ~19 min at 901 docs/s; index ~2 min; sweep ~4 min; gate ~2 min.

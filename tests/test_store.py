@@ -1,7 +1,6 @@
 import json
 import os
 import threading
-import time
 
 from exa_home.store import OFFSETS_FILENAME, ContentStore
 
@@ -194,12 +193,16 @@ def test_store_concurrent_gets_do_not_serialize_disk_io(tmp_path, monkeypatch):
 
     fresh = ContentStore(root)
     real_read = fresh._read_record
+    # A barrier proves overlap directly: every thread must be inside the
+    # read before any can proceed. If a global lock serialized reads, the
+    # barrier times out instead of the test depending on wall-clock luck.
+    barrier = threading.Barrier(len(ids), timeout=2)
 
-    def slow_read(*args, **kwargs):
-        time.sleep(0.05)
+    def overlapping_read(*args, **kwargs):
+        barrier.wait()
         return real_read(*args, **kwargs)
 
-    monkeypatch.setattr(fresh, "_read_record", slow_read)
+    monkeypatch.setattr(fresh, "_read_record", overlapping_read)
     errors: list[BaseException] = []
 
     def worker(doc_id):
@@ -208,16 +211,12 @@ def test_store_concurrent_gets_do_not_serialize_disk_io(tmp_path, monkeypatch):
         except BaseException as e:  # noqa: BLE001 — surface in the main thread
             errors.append(e)
 
-    t0 = time.perf_counter()
     threads = [threading.Thread(target=worker, args=(i,)) for i in ids]
     for t in threads:
         t.start()
     for t in threads:
         t.join()
-    elapsed = time.perf_counter() - t0
-    assert not errors
-    # Serial would be 8 * 50ms = 400ms; overlapping reads stay far below.
-    assert elapsed < 0.25, f"reads serialized: {elapsed:.3f}s"
+    assert not errors, f"concurrent reads did not overlap: {errors}"
 
 
 def test_store_rescan_is_bounded_to_appended_tail(tmp_path):
@@ -320,3 +319,194 @@ def test_store_reset_prunes_only_its_own_files(tmp_path):
     assert fresh.get("a") is None
     # reset() on an empty/absent store is a no-op, not an error.
     assert ContentStore(str(tmp_path / "missing")).reset() == 0
+
+
+def test_miss_on_unchanged_shard_does_not_rescan(tmp_path):
+    """A missing id must not re-read an unchanged shard.
+
+    The tail-rescan fix removed the old `_shard_changed` gate, so every
+    miss scanned the whole shard: 1.5-2.5 ms/miss at 81k docs and ~90 ms
+    at 1M. The scan counter must stay flat across repeated misses.
+    """
+    root = str(tmp_path)
+    s = ContentStore(root)
+    s.begin_bulk()
+    for i in range(400):
+        s.put(_doc(f"d{i}", "body " + "x" * 200))
+    s.save_index()
+
+    fresh = ContentStore(root)
+    fresh._ensure_index()
+    before = fresh.stats["scan_bytes"]
+    for i in range(50):
+        assert fresh.get(f"missing-{i}") is None
+    assert fresh.stats["scan_bytes"] == before
+
+
+def test_rebuilt_shard_drops_stale_entry_without_repeated_rescan(tmp_path):
+    """A doc removed by a shard rebuild must be dropped from the index.
+
+    Otherwise the stale offset fails on every get, and the retry path
+    force-rescans the shard forever (the second miss storm).
+    """
+    root = str(tmp_path)
+    s = ContentStore(root)
+    gone, kept = _same_shard_pair(s)
+    s.begin_bulk()
+    s.put(_doc(gone, "aaaa"))
+    s.put(_doc(kept, "bbbb"))
+    s.save_index()
+    shard = s._shard(gone)
+    assert s._shard(kept) == shard
+
+    # Rewrite the shard with the same total byte length but without "gone".
+    with open(shard, "w") as f:
+        f.write(json.dumps(_doc(kept, "bbbb")) + "\n")
+        f.write(json.dumps(_doc("filler", "cccc")) + "\n")
+
+    fresh = ContentStore(root)
+    assert fresh.get(gone) is None
+    after_first = fresh.stats["scan_bytes"]
+    assert fresh.get(gone) is None
+    assert fresh.stats["scan_bytes"] == after_first, "stale id rescanned the shard"
+
+
+def test_mixed_offsets_digest_downgrade_is_refused(tmp_path):
+    """Stripping one entry's digest must not re-enable legacy trust for it.
+
+    An attacker-writable offsets.json could otherwise downgrade a single
+    target doc while leaving the rest of the file v2.
+    """
+    root = str(tmp_path)
+    s = ContentStore(root)
+    a, b = _same_shard_pair(s)
+    s.begin_bulk()
+    s.put(_doc(a, "original-a"))
+    s.put(_doc(b, "original-b"))
+    ipath = s.save_index()
+
+    with open(ipath, encoding="utf-8") as f:
+        serial = json.load(f)
+    serial[a] = serial[a][:3]  # drop the digest column for one entry
+    with open(ipath, "w", encoding="utf-8") as f:
+        json.dump(serial, f)
+
+    # Substitute a's bytes in place (same length) — the downgraded entry
+    # must not be served from the new bytes.
+    shard = s._shard(a)
+    with open(shard, "rb") as f:
+        raw = f.read()
+    old = json.dumps(_doc(a, "original-a"))
+    new = json.dumps(_doc(a, "tampered-a"))
+    assert len(old) == len(new)
+    with open(shard, "wb") as f:
+        f.write(raw.replace(old.encode(), new.encode()))
+
+    fresh = ContentStore(root)
+    assert fresh.get(a) is None, "downgraded entry served substituted bytes"
+    assert fresh.get(b)["text"] == "original-b"
+
+
+def test_offsets_shard_path_traversal_is_ignored(tmp_path):
+    """S2: an attacker-writable offsets.json must not read outside the store."""
+    import hashlib
+
+    root = tmp_path / "store"
+    root.mkdir()
+    secret = tmp_path / "secret.jsonl"
+    payload = json.dumps(_doc("evil", "top secret")) + "\n"
+    secret.write_text(payload)
+    digest = hashlib.sha256(payload.encode()).hexdigest()
+    (root / "offsets.json").write_text(
+        json.dumps(
+            {
+                "evil": ["../secret.jsonl", 0, len(payload), digest],
+                "absolute": [str(secret), 0, len(payload), digest],
+            }
+        )
+    )
+
+    s = ContentStore(str(root))
+    assert s.get("evil") is None
+    assert s.get("absolute") is None
+
+
+def test_rebuilt_shard_with_a_bad_boundary_byte_forces_a_full_scan(tmp_path):
+    """The append fast path must only trust a real record boundary.
+
+    A shard rebuilt to a LARGER size than the recorded one used to be
+    scanned from the old size, silently skipping every record before it.
+    """
+    root = str(tmp_path)
+    s = ContentStore(root)
+    s.begin_bulk()
+    a, b = _same_shard_pair(s)
+    s.put(_doc(a, "old-a"))
+    s.save_index()
+    path = s._shard(a)
+    recorded = os.path.getsize(path)
+
+    # Rebuild: garbage where the old record started, then a valid new
+    # record for another id in the same shard.
+    with open(path, "wb") as f:
+        f.write(b"x" * (recorded + 8) + b"\n")
+        f.write((json.dumps(_doc(b, "new-b")) + "\n").encode())
+
+    fresh = ContentStore(root)
+    assert fresh.get(b)["text"] == "new-b"
+    # A tail scan would have scanned only the appended bytes.
+    assert fresh.stats["scan_bytes"] >= recorded
+
+
+def test_probe_oserror_falls_back_to_a_full_scan(tmp_path, monkeypatch):
+    """A transient failure opening the shard for the boundary probe must
+    not skip the appended record (start falls back to 0)."""
+    import builtins
+
+    root = str(tmp_path)
+    s = ContentStore(root)
+    s.begin_bulk()
+    a, b = _same_shard_pair(s)
+    s.put(_doc(a, "a-text"))
+    s.save_index()
+    path = s._shard(a)
+    with open(path, "ab") as f:
+        f.write((json.dumps(_doc(b, "b-text")) + "\n").encode())
+
+    real_open = builtins.open
+    state = {"failed": False}
+
+    def flaky_open(file, *args, **kwargs):
+        if file == path and args and args[0] == "rb" and not state["failed"]:
+            state["failed"] = True
+            raise OSError("simulated transient failure")
+        return real_open(file, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", flaky_open)
+    fresh = ContentStore(root)
+    assert fresh.get(b)["text"] == "b-text"
+    assert state["failed"] is True
+    assert fresh.get(a)["text"] == "a-text"
+
+
+def test_reset_closes_open_bulk_handles_and_allows_a_rebuild(tmp_path):
+    """reset() mid-bulk must close the cached append handles before it
+    deletes their files, then the store must be reusable."""
+    root = str(tmp_path)
+    s = ContentStore(root)
+    s.begin_bulk()
+    a, _b = _same_shard_pair(s)
+    s.put(_doc(a, "bulk text"))
+    assert s._bulk_handles
+    handles = list(s._bulk_handles.values())
+
+    assert s.reset() == 1
+    assert s._bulk_handles is None
+    assert all(h.closed for h in handles)
+    assert s.get(a) is None
+
+    # The same instance can be rebuilt after reset.
+    s.begin_bulk()
+    s.put(_doc(a, "rebuilt"))
+    s.save_index()
+    assert ContentStore(root).get(a)["text"] == "rebuilt"

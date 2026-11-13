@@ -215,3 +215,65 @@ def test_index_dir_byte_layout(tmp_path):
         total += ln
     assert total == n and off == len(raw)
     assert json.loads((tmp_path / DOC_IDS_FILE).read_text()) == ids
+
+
+def _add_manifest_key(index_dir, key: str, digest: str) -> None:
+    mpath = index_dir / MANIFEST
+    m = json.loads(mpath.read_text())
+    m["files"][key] = digest
+    mpath.write_text(json.dumps(m))
+
+
+def test_verify_manifest_rejects_traversal_key(tmp_path):
+    """A crafted manifest key must not make the verifier read outside the
+    index (the error message leaks 12 hex chars of the target file)."""
+    _write_core_files(tmp_path)
+    write_manifest(str(tmp_path), {"dim": 256})
+    outside = tmp_path / "outside.bin"
+    outside.write_bytes(b"secret")
+    _add_manifest_key(tmp_path, "../outside.bin", sha256(str(outside)))
+
+    with pytest.raises(ValueError, match="unsafe file key"):
+        verify_manifest(str(tmp_path))
+
+
+def test_verify_manifest_rejects_absolute_and_symlink_escape(tmp_path):
+    _write_core_files(tmp_path)
+    write_manifest(str(tmp_path), {"dim": 256})
+    outside = tmp_path / "outside.bin"
+    outside.write_bytes(b"secret")
+    _add_manifest_key(tmp_path, str(outside), sha256(str(outside)))
+    with pytest.raises(ValueError, match="unsafe file key"):
+        verify_manifest(str(tmp_path))
+
+    # A benign-looking relative key that is a symlink out of the index.
+    index = tmp_path / "index"
+    index.mkdir()
+    _write_core_files(index)
+    (index / "escape.bin").symlink_to(outside)
+    write_manifest(str(index), {"dim": 256})
+    _add_manifest_key(index, "escape.bin", sha256(str(outside)))
+    with pytest.raises(ValueError, match="unsafe file key"):
+        verify_manifest(str(index))
+
+
+def test_manifest_excludes_store_dirs_at_any_depth(tmp_path):
+    """P11: a nested store/ is corpus too, not index state."""
+    _write_core_files(tmp_path)
+    nested = tmp_path / "sub" / "store"
+    nested.mkdir(parents=True)
+    (nested / "shard-0.jsonl").write_text('{"id": "a"}\n')
+    write_manifest(str(tmp_path), {"dim": 256})
+    files = json.loads((tmp_path / MANIFEST).read_text())["files"]
+    assert not any("store" in key.split("/") for key in files), files.keys()
+
+
+def test_manifest_excludes_the_build_only_centroids_npy(tmp_path):
+    """centroids.npy is a K-means input; deleting it must not fail verify."""
+    _write_core_files(tmp_path)
+    (tmp_path / "centroids.npy").write_bytes(b"numpy build artifact")
+    write_manifest(str(tmp_path), {"dim": 256})
+    files = json.loads((tmp_path / MANIFEST).read_text())["files"]
+    assert "centroids.npy" not in files
+    (tmp_path / "centroids.npy").unlink()
+    assert verify_manifest(str(tmp_path))["dim"] == 256

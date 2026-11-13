@@ -217,3 +217,19 @@ def test_complete_file_is_skipped_without_a_request(tmp_path, monkeypatch, dw):
     assert (Path(path), size) == (f, len(payload))
     assert f.read_bytes() == payload
     assert ranges == []  # nothing was fetched
+
+
+def test_zero_byte_file_is_not_a_verified_wet(tmp_path):
+    """A 200-with-empty-body mirror must not count as a completed WET."""
+    from scripts.download_wet import verify_wet_gzip
+
+    empty = tmp_path / "empty.wet.gz"
+    empty.write_bytes(b"")
+    with pytest.raises(OSError, match="gzip verification failed"):
+        verify_wet_gzip(str(empty))
+
+    # A valid gzip of zero bytes is still not a WET payload.
+    empty_gz = tmp_path / "empty-payload.wet.gz"
+    empty_gz.write_bytes(gzip.compress(b"", mtime=0))
+    with pytest.raises(OSError, match="no payload"):
+        verify_wet_gzip(str(empty_gz))

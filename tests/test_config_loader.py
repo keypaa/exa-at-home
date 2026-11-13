@@ -88,3 +88,52 @@ def test_load_result_drives_mcp_operating_point(tmp_path):
         assert mcp_server.home_health()["operating_point"]["k"] == 3
     finally:
         mcp_server.configure_operating_point(dict(OPERATING_POINT))
+
+
+def test_operating_point_only_config_is_not_a_false_conflict():
+    """A valid operating_point-only override must not compare against presets."""
+    cfg = normalize({"operating_point": {"nprobe": 16, "k": 5}})
+    assert cfg["operating_point"]["nprobe"] == 16
+    assert cfg["operating_point"]["k"] == 5
+
+
+def test_partial_serving_block_is_filled_to_all_keys():
+    cfg = normalize({"serving": {"nprobe": 9}})
+    assert set(cfg["serving"]) == {
+        "nprobe",
+        "top_coarse",
+        "max_pair_tokens",
+        "batch_size",
+        "max_query_tokens",
+        "budget_ms",
+        "k",
+    }
+    assert cfg["operating_point"] == cfg["serving"]
+
+
+def test_wrong_known_key_types_fail_loudly():
+    with pytest.raises(ValueError, match="serving.k must be an integer"):
+        normalize({"serving": {"k": "3"}})
+    with pytest.raises(ValueError, match="serving.nprobe must be an integer"):
+        normalize({"serving": {"nprobe": None}})
+    with pytest.raises(ValueError, match="ingest.wet_files must be an integer"):
+        normalize({"ingest": {"wet_files": "abc"}})
+    with pytest.raises(ValueError, match="resilience.resume must be a boolean"):
+        normalize({"resilience": {"resume": "yes"}})
+    with pytest.raises(ValueError, match="operating_point.budget_ms"):
+        normalize({"operating_point": {"budget_ms": -1}})
+
+
+def test_normalize_does_not_mutate_the_callers_serving_dict():
+    raw = {"serving": {"nprobe": 9}}
+    normalize(raw)
+    assert raw == {"serving": {"nprobe": 9}}
+
+
+def test_cli_target_count_rejects_non_int():
+    from exa_home.config_loader import cli_target_count
+
+    assert cli_target_count({"ingest": {"wet_target_count": 3}}) == 3
+    assert cli_target_count({"ingest": {"wet_target_count": None}}) is None
+    with pytest.raises(ValueError, match="must be an integer"):
+        cli_target_count({"ingest": {"wet_target_count": "3"}})

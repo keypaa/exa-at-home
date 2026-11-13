@@ -73,6 +73,16 @@ def _get_app():
     return _app
 
 
+class InvalidRequest(ValueError):
+    """A caller-fault validation error, safe to echo at the MCP boundary.
+
+    A plain ValueError can come from a backend (numpy shape text, a store
+    corruption message with an internal path); only this subclass is
+    treated as a caller error. The tool boundary validates inputs itself
+    and raises this class.
+    """
+
+
 def _safe_tool(fn):
     """Wrap a tool so the MCP boundary never returns internal details."""
 
@@ -80,7 +90,7 @@ def _safe_tool(fn):
     def wrapper(*args, **kwargs):
         try:
             return fn(*args, **kwargs)
-        except ValueError as e:
+        except InvalidRequest as e:
             # Validation errors are the caller's fault: keep the message,
             # never the traceback/type internals.
             return {"error": {"code": "invalid_request", "message": str(e)}}
@@ -90,21 +100,46 @@ def _safe_tool(fn):
     return wrapper
 
 
+_STRIP_TABLE: dict[int, None] | None = None
+_STRIP_TABLE_LOCK = threading.Lock()
+
+
+def _strip_table() -> dict[int, None]:
+    """Deletion table for Cc/Cf/Cs, built once.
+
+    The per-character `unicodedata.category` loop cost ~4 ms per 26k
+    chars (~80 ms per max-size home_contents call) and was fully
+    attacker-triggerable. `str.translate` with a precomputed table is
+    ~100x cheaper; building the table is a one-time ~0.2 s.
+    """
+    global _STRIP_TABLE
+    if _STRIP_TABLE is None:
+        with _STRIP_TABLE_LOCK:
+            if _STRIP_TABLE is None:
+                table: dict[int, None] = {}
+                for cp in range(sys.maxunicode + 1):
+                    if cp in (0x09, 0x0A):  # tab/newline are preserved
+                        continue
+                    if unicodedata.category(chr(cp)) in ("Cc", "Cf", "Cs"):
+                        table[cp] = None
+                _STRIP_TABLE = table
+    return _STRIP_TABLE
+
+
 def _sanitize_text(text: str) -> str:
     """Strip control/format characters from corpus-derived text.
 
     Common Crawl text is attacker-controlled. Control characters are
     removed (newline/tab preserved) and the text is marked untrusted at the
-    response level (finding S3). This is not a prompt-injection defence by
-    itself — the provenance flag tells the client to treat it as data.
+    response level (finding S3). Cs (lone surrogate) is stripped too: it is
+    not valid UTF-8 and makes the MCP serializer fail, which would turn one
+    corpus row into a whole-call error. This is not a prompt-injection
+    defence by itself — the provenance flag tells the client to treat it as
+    data.
     """
     if not text:
         return ""
-    return "".join(
-        ch
-        for ch in text
-        if ch in ("\n", "\t") or unicodedata.category(ch) not in ("Cc", "Cf")
-    )
+    return text.translate(_strip_table())
 
 
 def home_search(
@@ -115,17 +150,26 @@ def home_search(
 ) -> dict:
     """Search the corpus. Returns {results, degraded, profile?, error?}."""
     if not query or not query.strip():
-        raise ValueError("query must be non-empty")
+        raise InvalidRequest("query must be non-empty")
     if len(query) > MAX_QUERY_CHARS:
-        raise ValueError(
+        raise InvalidRequest(
             f"query must be <= {MAX_QUERY_CHARS} characters (got {len(query)})"
         )
     op = _operating_point
     if top_k is None:
         top_k = op["k"]
     if top_k <= 0 or top_k > 100:
-        raise ValueError("top_k must be in (0, 100]")
-    from .orch import build_search_dag, run_search
+        raise InvalidRequest("top_k must be in (0, 100]")
+    from .orch import build_search_dag, run_search, translate_filters
+
+    # Validate the filter shape at the tool boundary. DAG.run turns node
+    # exceptions into an error dict, which would otherwise be redacted as
+    # an internal fault: a caller typo ({"bogus": ...}) must be
+    # invalid_request, not "internal error".
+    try:
+        translate_filters(filters or {})
+    except ValueError as e:
+        raise InvalidRequest(str(e)) from e
 
     # Retrieve at least `top_k` coarse candidates so a caller asking for
     # top_k > top_coarse is not silently capped at top_coarse (finding P2-09).
@@ -166,21 +210,22 @@ def home_search(
         enriched.append(item)
     res["results"] = enriched
     # Never expose the underlying exception detail over the MCP boundary.
+    # Use the same shape as `_safe_tool` so clients parse one contract.
     if isinstance(res.get("error"), dict):
-        res["error"] = {"error": "internal error (see server logs)"}
+        res["error"] = {"code": "internal", "message": "internal error"}
     return res
 
 
 def home_contents(ids: list[str], max_chars_per_doc: int = 8000) -> dict:
     """Fetch stored text for the given doc ids (paginated, PAGE_SIZE per call)."""
     if not ids or not isinstance(ids, (list, tuple)):
-        raise ValueError("ids must be a non-empty list of store keys")
+        raise InvalidRequest("ids must be a non-empty list of store keys")
     if len(ids) > MAX_IDS_PER_CONTENTS_CALL:
-        raise ValueError(
+        raise InvalidRequest(
             f"ids must be <= {MAX_IDS_PER_CONTENTS_CALL} per call (got {len(ids)})"
         )
     if max_chars_per_doc <= 0 or max_chars_per_doc > 20_000:
-        raise ValueError("max_chars_per_doc must be in (0, 20000]")
+        raise InvalidRequest("max_chars_per_doc must be in (0, 20000]")
     page, rest = list(ids[:PAGE_SIZE]), list(ids[PAGE_SIZE:])
     store = _deps["store"]
     if hasattr(store, "get_many"):
@@ -234,31 +279,96 @@ class RateLimiter:
 
 
 def _check_bearer(authorization: str, token: str | None) -> bool:
-    """Constant-time bearer check; an empty token disables auth."""
+    """Constant-time bearer check; an empty token disables auth.
+
+    The scheme is case-insensitive and may be separated from the token by
+    any run of whitespace (RFC 7235). Compare encoded bytes: comparing
+    `str` raises TypeError for non-ASCII header values, which would turn
+    a malformed credential into an unmasked 500 instead of a 401.
+    """
     if not token:
         return True
-    return hmac.compare_digest(authorization or "", f"Bearer {token}")
+    parts = (authorization or "").split(None, 1)
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        return False
+    try:
+        return hmac.compare_digest(
+            parts[1].strip().encode("utf-8"), token.encode("utf-8")
+        )
+    except (TypeError, UnicodeEncodeError):
+        return False
+
+
+class AuthRateLimitMiddleware:
+    """Starlette ASGI middleware: bearer auth + per-client rate limit.
+
+    This deliberately is NOT a `fastmcp.server.middleware.Middleware`.
+    `FastMCP.http_app(middleware=...)` takes Starlette middleware
+    *classes*; passing a FastMCP middleware instance raised
+    `TypeError: cannot unpack non-iterable ...` on the first HTTP request
+    and every request 500'd. Running at the ASGI layer also means auth
+    covers `initialize`/`tools/list`, not only `tools/call`, and failures
+    are real HTTP 401/429 responses instead of JSON-RPC errors with HTTP
+    200.
+    """
+
+    def __init__(self, app, token: str | None = None, rate_limit: int = 0):
+        self.app = app
+        self.token = token
+        self._rate_limit = rate_limit
+        self._limiters: dict[str, RateLimiter] = {}
+        self._limiters_lock = threading.Lock()
+
+    def _limiter(self, scope) -> RateLimiter:
+        client = scope.get("client") or ("unknown", 0)
+        key = str(client[0])
+        with self._limiters_lock:
+            limiter = self._limiters.get(key)
+            if limiter is None:
+                limiter = RateLimiter(self._rate_limit)
+                self._limiters[key] = limiter
+            return limiter
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        from starlette.responses import JSONResponse
+
+        if self.token:
+            authorization = ""
+            for key, value in scope.get("headers", []):
+                if key == b"authorization":
+                    authorization = value.decode("latin-1")
+                    break
+            if not _check_bearer(authorization, self.token):
+                response = JSONResponse(
+                    {
+                        "error": {
+                            "code": "unauthorized",
+                            "message": "missing or invalid bearer token",
+                        }
+                    },
+                    status_code=401,
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+                return await response(scope, receive, send)
+        if not self._limiter(scope).allow():
+            response = JSONResponse(
+                {
+                    "error": {
+                        "code": "rate_limited",
+                        "message": "rate limit exceeded; retry later",
+                    }
+                },
+                status_code=429,
+                headers={"Retry-After": "60"},
+            )
+            return await response(scope, receive, send)
+        return await self.app(scope, receive, send)
 
 
 def _auth_middleware_class():
-    """Build the FastMCP middleware class lazily (fastmcp may be absent)."""
-    from fastmcp.server.dependencies import get_http_headers
-    from fastmcp.server.middleware import Middleware
-
-    class AuthRateLimitMiddleware(Middleware):
-        def __init__(self, token: str | None = None, rate_limit: int = 0):
-            self.token = token
-            self.limiter = RateLimiter(rate_limit)
-
-        async def on_call_tool(self, context, call_next):
-            if self.token:
-                headers = get_http_headers(include={"authorization"})
-                if not _check_bearer(headers.get("authorization", ""), self.token):
-                    raise PermissionError("unauthorized: missing/invalid bearer token")
-            if not self.limiter.allow():
-                raise RuntimeError("rate limit exceeded; retry later")
-            return await call_next(context)
-
+    """The ASGI middleware class (kept as a hook for tests/embedders)."""
     return AuthRateLimitMiddleware
 
 
@@ -294,6 +404,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--config", default=None, help="YAML/JSON config overrides")
     a = ap.parse_args(argv)
+    if a.rate_limit < 0:
+        ap.error("--rate-limit must be >= 0 (0 disables)")
 
     if a.config:
         from .config_loader import load
@@ -326,11 +438,21 @@ def main(argv: list[str] | None = None) -> int:
                 "the server is unauthenticated",
                 file=sys.stderr,
             )
-        middleware = []
+        # `http_app` expects Starlette middleware descriptors, not
+        # instantiated middleware. This was the bug that made every HTTP
+        # request raise TypeError before the ASGI middleware above ran.
+        from starlette.middleware import Middleware
+
+        middleware = None
         if a.token or a.rate_limit:
-            mw_cls = _auth_middleware_class()
-            middleware.append(mw_cls(token=a.token, rate_limit=a.rate_limit))
-        http_app = app.http_app(middleware=middleware or None)
+            middleware = [
+                Middleware(
+                    _auth_middleware_class(),
+                    token=a.token,
+                    rate_limit=a.rate_limit,
+                )
+            ]
+        http_app = app.http_app(middleware=middleware)
         import uvicorn
 
         uvicorn.run(http_app, host=a.host, port=a.port)

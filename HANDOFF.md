@@ -4,10 +4,10 @@
 read `ROADMAP.md` and `WORKPLAN.md`. Together they are the complete state
 of the project, what it is, what works, what is open, and what to do next.
 
-Last updated: 2026-11-13. Latest commit: `0a2072a` — **merged into `main`
-(fast-forward) and pushed to `origin/main`**; the temporary
-`audit/fix-all-findings` branch was deleted after the merge. All work is on
-`main` now.
+Last updated: 2026-11-13. `origin/main` is `0a2072a` (the audit merge,
+pushed). Local `main` is **two commits ahead and not pushed**: `1fa0e60`
+(the docs-consistency pass) and the review-fix batch in this tree. The
+temporary `audit/fix-all-findings` branch was deleted after the merge.
 
 ---
 
@@ -23,7 +23,7 @@ decisions).
 
 - GitHub: https://github.com/keypaa/exa-at-home
 - Local: `/home/keypaa/Projects/exa_at_home_exp`
-- License: none specified (private learning repo)
+- License: Apache 2.0 (see `LICENSE`)
 
 **Ultimate goal (4 conditions, all must hold):**
 1. It works — full funnel over 1M+ real Common Crawl pages, served over MCP,
@@ -108,7 +108,7 @@ zenno/           Design spec + implementation plan (historical, banner-marked)
 
 | Component | State | Evidence |
 |---|---|---|
-| Rust ANN core | Solid | 28 Rust tests: binary quant, LUT (33×), IVF, roaring filters, manifest verify, partition checks, NaN-safe, non-contiguous numpy |
+| Rust ANN core | Solid | 29 Rust tests: binary quant, LUT (33×), IVF, roaring filters, manifest verify, partition checks, NaN-safe, non-contiguous numpy |
 | Pipeline | Works end to end | ingest 81k docs → embed → K=1024 centroids → index → gate → recall; ~6 min on the box |
 | Measurement harness | Works | `sweep.py` (4-D grid, timestamped artifacts, full-config ledger), `e2e_latency` (p50/p99 + waterfall integrity), `score_relevance` (judged precision@10) |
 | Notebook (molab) | Works | self-bootstrapping, literate, Plotly, ran the whole session unattended-ish |
@@ -117,7 +117,7 @@ zenno/           Design spec + implementation plan (historical, banner-marked)
 
 ### The numbers
 
-- **Toy gate (81k docs):** p50 47.7ms vs 100ms budget — PASS. Breakdown: embed 8.7, ann 5.1, rerank 32.7 (fetch 5.2 / model 28.2), snippet 0.02.
+- **Toy gate (81k docs):** p50 47.7ms vs 100ms budget — PASS. Breakdown: embed 8.7, ann 5.1, rerank 33.6 (fetch 5.2 / model 28.2), snippet 0.02 (stage p50s sum to 47.4; percentiles are not additive).
 - **Reranker decision (E3, 50 questions):** target recall@10 0.740 = 0.740 (tie), MRR 0.641 → 0.712 (+0.071, p=0.18, not significant), 0 degraded. **Kept.**
 - **Exact-id recall:** coarse 0.4015 (nprobe=8), 0.4240 (nprobe=16), reranked 0.2885. The reranker's earlier "loss" was a query-type artifact — see LEARNINGS §4/§13.
 - **Binary ceiling:** 0.444 (full scan vs float brute force) — matches M2's synth 0.4460. The representation tops out near 44% id-agreement.
@@ -126,7 +126,7 @@ zenno/           Design spec + implementation plan (historical, banner-marked)
 
 ### What is measured but weak
 
-- 16 of 21 ledger rows carry no knobs and no recall (provenance-poor).
+- 23 of 32 ledger rows carry no knobs and no recall (rows 1–16, 21–24, 30–32); 6 carry both (17–18, 26–29); 3 carry knobs only (19–20, 25).
 - The M5c/M5d recall curves are prose-only (no committed artifacts).
 - The headline "46.5ms / 0.2895" is pre-ledger; the ledger's actual best is 43.7ms / 0.2885.
 - The reranker is kept on a favourable-but-not-significant MRR (p=0.18, n=50).
@@ -140,7 +140,7 @@ zenno/           Design spec + implementation plan (historical, banner-marked)
 - **7 `cloud_only` tests** — run only via the new `cloud_only` CI job (workflow_dispatch / weekly schedule); not on every push.
 - **The recall threshold**: `scripts/gate.py` implements G1–G4 with hardcoded thresholds and CI runs `gate.py --synth`; the full real-index gate remains manual/cloud-only.
 - **Scale blockers closed** (filter build RAM, posting lists, ground truth, store hashing) — see the audit wave. Remaining: `stage_ingest`'s URL-dedup set (~660MB at 5M URLs, inherent to URL-second dedup).
-- **The 1M build**: exists (manifest.json: n_docs=2,576,778, K=10,000), but its p50/p99/G1 ledger rows are **not committed** to runs.jsonl — not reproducible from this repo as it stands.
+- **The 1M build**: ran on the box (the committed `artifacts/box-2026-10-25/manifest.json` records n_docs=2,576,778, K=10,000), but the index/vectors/store themselves are **not in this repo**, and its p50/p99/G1 ledger rows are **not committed** to runs.jsonl — not reproducible from this repo as it stands.
 
 ---
 
@@ -241,8 +241,8 @@ literate markdown + library imports + Plotly graphs.
 python -m venv .venv && source .venv/bin/activate
 pip install -e .[dev]
 cd crates/ann-core && maturin develop && cd ../..
-python -m pytest tests/ -m "not cloud_only" -q   # 174 passed, 7 deselected
-cargo test -p ann-core                            # 28 passed
+python -m pytest tests/ -m "not cloud_only" -q   # 225 passed, 7 deselected
+cargo test -p ann-core                            # 29 passed
 ```
 
 **Cloud box (toy → gate, ~30 min attended):**
@@ -264,23 +264,15 @@ sliders re-run the gate live.
 
 ---
 
-## 10. Immediate next steps (in order)
+## 10. Immediate next steps (state as of 2026-11-13)
 
-1. **Item 1b — pre-tokenize offline.** The embedder is CPU-bound (442 docs/s,
-   96GB GPU at 1.1GB). Tokenize all docs once, save ids, then the GPU does
-   pure forward passes. Measure before/after. This is the lever that
-   determines the scale ceiling.
-2. **Item 2 — resumable chunked embed.** Per-chunk part files so an
-   interrupted 1M embed resumes. (37 min of GPU is currently all-or-nothing.)
-3. **Item 3 — the four gates.** Implement as one command with exit code.
-4. **Item 4 — 1M session plan.** Written, like E3's. Pre-registered
-   acceptance criteria.
-5. **Item 5 — 1M build.** Unranked first-130 WET, same rule as the toy.
-6. **Item 6 — 1M sweep.** nprobe × top_coarse × K. The scale curve.
-7. **Item 7 — 5M build** (stretch, if 1M is clean).
-8. **Item 8 — `lite`/`auto` serving tier.** Coarse-only vs coarse+rerank,
-   one switch, one measured frontier. D1 just made this concrete.
-9. **Item 9 — MCP server benchmarked against a real index.**
+The 2026-10-25 list is historical; the live list is §16. Item states:
+1b done (M9: 636 → 901 docs/s); 2 done (`embed_resumable.py`); 3 done
+(`scripts/gate.py` G1–G4, CI runs `--synth`; the real-index gate is
+manual/cloud-only); 4 done (`zenno/plans/2026-10-27-item-4-1m-session-plan.md`);
+5 done on the box, not reproducible (ledger rows uncommitted); 6 partly done
+(sweep cells recorded in EXPERIMENTS, no committed ledger rows); 7–9 remain
+(§16 items 2–4).
 
 **Corpus decision (D2):** unranked first (same rule as toy) for the scale
 comparison; density-ranked English as a separate run. Toy ASCII fraction:
@@ -331,7 +323,8 @@ comparison; density-ranked English as a separate run. Toy ASCII fraction:
 | Artifact | What it is | Where |
 |---|---|---|
 | `runs.jsonl` | 32-row ledger (28 real + 4 synth smoke rows): p50/p99 + stages + breakdown + recall + full config | repo root |
-| `sweeps/20261025-130647/`, `sweeps/20261025-161823/` | **1M sweep grids (grid.json only)** — box run 2026-10-25; their `runs.jsonl` rows were never committed, so they are not reproducible | repo |
+| `sweeps/20261025-130647/` | **1M sweep grid (grid.json only)** — box run 2026-10-25; its `runs.jsonl` rows were never committed, so it is not reproducible | repo |
+| `sweeps/20261025-161823/` | **4-WET sweep grid (grid.json only)** — box run 2026-10-25; its cells are the committed ledger rows 25–30 (gate + 4-combo sweep) | repo |
 | `sweeps/20261011-151336/` | Pair-tokens sweep: grid.json + 2 pred files + sweep.log | repo |
 | `sweeps/20261021-161945/` | Batch-size sweep: grid.json + 3 pred files + sweep.log | repo |
 | `eval/review_toy_20261021.json` | 10 queries + 200 blinded entries (A/B shuffled) | repo |
@@ -361,9 +354,12 @@ comparison; density-ranked English as a separate run. Toy ASCII fraction:
 - **D3 — 1M scale blockers: CLOSED.** Filter build 21× less RAM, posting
   lists 86× faster, ground truth 37× faster, sweep runs queries once.
   Remaining: `stage_ingest`'s URL-dedup set (~660MB at 5M URLs, inherent).
-- **D4 — recall threshold: NOT SET.** The README claims "below-threshold
-  recall fails CI" — no threshold, no CI step. Either wire it or delete the
-  claim.
+- **D4 — recall threshold: PARTIALLY WIRED.** `scripts/gate.py` implements
+  G1–G4 with hardcoded toy baselines (G1 0.2885, G2 0.740) and pre-registered
+  drop budgets; CI runs `gate.py --synth` on every push. There is still no CI
+  step that fails on a real-corpus recall regression (the real-index gate is
+  manual/cloud-only), and a 1M baseline must be recorded before G1 is
+  meaningful at that scale.
 - **D5 — the serving tier (`lite`/`auto`):** not built. D1 just made it
   concrete.
 
@@ -376,8 +372,8 @@ comparison; density-ranked English as a separate run. Toy ASCII fraction:
 python -m venv .venv && source .venv/bin/activate
 pip install -e .[dev]
 cd crates/ann-core && maturin develop && cd ../..
-python -m pytest tests/ -m "not cloud_only" -q   # 174 passed, 7 deselected
-cargo test -p ann-core                            # 28 passed
+python -m pytest tests/ -m "not cloud_only" -q   # 225 passed, 7 deselected
+cargo test -p ann-core                            # 29 passed
 ```
 
 **Cloud box (toy → gate, ~30 min attended):**
@@ -422,11 +418,13 @@ re-run the gate live.
 
 ## 16. Immediate next step (post-audit, post-merge)
 
-The audit wave (24 commits, 2026-11-12/13) is merged into `main` and pushed;
-the roadmap items it did NOT touch are unchanged and still open, in order:
+The audit wave (23 commits, 2026-11-12/13; `8e500a4..0a2072a`) is merged
+into `main` and pushed. The docs-consistency pass and the review-fix batch
+are local, unpushed commits on top of it. The roadmap items the audit did
+NOT touch are unchanged and still open, in order:
 
 1. **Re-anchor the golden 50-question set into the 1M haystack** (`eval/E3_PROTOCOL.md`
-   §D1 — "the scale story is answering"). This is the number that makes 1M a *scale*
+   — "the scale story is answering"). This is the number that makes 1M a *scale*
    claim rather than a rebuild; without it, G2 at 1M is simply unmeasured.
 2. **Commit the 1M ledger rows** (or re-run the 1 M build): `runs.jsonl` has 0
    one-million rows, so every 1M figure in the docs is currently box-only evidence.

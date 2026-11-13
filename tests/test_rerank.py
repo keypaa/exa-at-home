@@ -116,3 +116,57 @@ def test_real_model_200_pairs_under_40ms():
     assert degraded is False
     assert len(ranked) == 200
     assert dt_ms < 40, f"200-pair rerank took {dt_ms:.1f}ms, budget is 40ms"
+
+
+def test_reranker_pool_is_created_once_under_concurrency():
+    import threading
+
+    from exa_home.rerank import Reranker
+
+    r = Reranker.__new__(Reranker)
+    pools = []
+    barrier = threading.Barrier(16)
+
+    def grab():
+        barrier.wait()
+        pools.append(r._executor())
+
+    threads = [threading.Thread(target=grab) for _ in range(16)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len({id(p) for p in pools}) == 1, "concurrent callers built multiple pools"
+    r.close()
+
+
+def test_reranker_discarding_a_timed_out_pool_does_not_cancel_queued_work():
+    """The reranker is a process-wide singleton; one timeout must not
+    cancel a score another thread already submitted."""
+    import threading
+
+    from exa_home.rerank import Reranker
+
+    r = Reranker.__new__(Reranker)
+    pool = r._executor()
+    gate = threading.Event()
+
+    def queued():
+        gate.wait(2)
+        return "ran"
+
+    fut = pool.submit(queued)
+    r._discard_pool(pool)
+    gate.set()
+    assert fut.result(timeout=2) == "ran"
+    assert getattr(r, "_pool", None) is None
+    r.close()
+
+
+def test_reranker_close_is_idempotent_and_safe_after_partial_init():
+    from exa_home.rerank import Reranker
+
+    Reranker.__new__(Reranker).close()
+    r = Reranker.__new__(Reranker)
+    r.close()
+    r.close()

@@ -29,6 +29,92 @@ pub(crate) fn cmp_desc(a: f32, b: f32) -> Ordering {
     }
 }
 
+/// Reject a numpy view whose strides address bytes outside its base buffer.
+///
+/// `MAX_MATRIX_ELEMENTS` bounds the SHAPE, not the buffer: a small
+/// `as_strided` view can report a plausible shape while reading past the
+/// end of its 4-float base (verified OOB read). The element cap is not a
+/// memory-safety check; this is.
+fn check_view_extent(arr: &Bound<'_, PyAny>, what: &str) -> PyResult<()> {
+    let shape: Vec<usize> = arr.getattr("shape")?.extract()?;
+    let strides: Vec<isize> = arr.getattr("strides")?.extract()?;
+    let itemsize: usize = arr.getattr("itemsize")?.extract()?;
+    let mut min_off: isize = 0;
+    let mut max_off: isize = 0;
+    for (&dim, &stride) in shape.iter().zip(strides.iter()) {
+        if dim > 1 {
+            let span = (dim as isize - 1).checked_mul(stride).ok_or_else(|| {
+                PyValueError::new_err(format!("{what}: stride span overflows isize"))
+            })?;
+            if span < 0 {
+                min_off = min_off.checked_add(span).ok_or_else(|| {
+                    PyValueError::new_err(format!("{what}: view offset overflows isize"))
+                })?;
+            } else {
+                max_off = max_off.checked_add(span).ok_or_else(|| {
+                    PyValueError::new_err(format!("{what}: view offset overflows isize"))
+                })?;
+            }
+        }
+    }
+    let extent = max_off
+        .checked_sub(min_off)
+        .and_then(|v| v.checked_add(itemsize as isize))
+        .ok_or_else(|| PyValueError::new_err(format!("{what}: view extent overflows isize")))?;
+    if extent < 0 {
+        return Err(PyValueError::new_err(format!(
+            "{what}: invalid negative view extent"
+        )));
+    }
+    let extent = extent as usize;
+
+    // `as_strided` reports a numpy DummyArray as `.base`, which carries the
+    // real owner in its own `.base`. Walk the chain until an object that
+    // knows its byte length (an ndarray), bounded to avoid cycles.
+    let mut base = arr.getattr("base")?;
+    for _ in 0..8 {
+        if base.is_none() || base.getattr("nbytes").is_ok() {
+            break;
+        }
+        match base.getattr("base") {
+            Ok(next) if !next.is_none() => base = next,
+            _ => break,
+        }
+    }
+    if !base.is_none() {
+        if let Ok(base_nbytes) = base.getattr("nbytes").and_then(|v| v.extract::<usize>()) {
+            let view_ptr: usize = arr
+                .getattr("__array_interface__")?
+                .get_item("data")?
+                .get_item(0)?
+                .extract()?;
+            let base_ptr: usize = base
+                .getattr("__array_interface__")?
+                .get_item("data")?
+                .get_item(0)?
+                .extract()?;
+            let low = (view_ptr as isize).checked_add(min_off);
+            let high = (view_ptr as isize)
+                .checked_add(max_off)
+                .and_then(|v| v.checked_add(itemsize as isize));
+            let (Some(low), Some(high)) = (low, high) else {
+                return Err(PyValueError::new_err(format!(
+                    "{what}: view address overflows isize"
+                )));
+            };
+            let base_end = (base_ptr as isize).checked_add(base_nbytes as isize);
+            let inside = base_end.is_some_and(|end| low >= base_ptr as isize && high <= end);
+            if !inside {
+                return Err(PyValueError::new_err(format!(
+                    "{what}: strided view reads {extent} bytes outside its \
+                     {base_nbytes}-byte base buffer (out-of-bounds view)"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Reject a non-finite (NaN/Inf) query vector.
 ///
 /// A NaN query poisons every score it takes part in; that is a caller bug,
@@ -102,6 +188,7 @@ struct AnnIndex {
 impl AnnIndex {
     #[new]
     fn new(mat: PyReadonlyArray2<f32>, ids: Vec<String>) -> PyResult<Self> {
+        check_view_extent(mat.as_any(), "AnnIndex::new")?;
         let a = mat.as_array();
         if a.nrows() != ids.len() {
             return Err(PyValueError::new_err(format!(
@@ -140,6 +227,7 @@ impl AnnIndex {
 
     #[staticmethod]
     fn from_binary(pack: PyReadonlyArray2<u8>, ids: Vec<String>) -> PyResult<Self> {
+        check_view_extent(pack.as_any(), "AnnIndex.from_binary")?;
         let a = pack.as_array();
         if a.ncols() != 32 {
             return Err(PyValueError::new_err(format!(
@@ -152,6 +240,17 @@ impl AnnIndex {
                 "from_binary: {} code rows but {} ids",
                 a.nrows(),
                 ids.len()
+            )));
+        }
+        // Same allocation cap as `new`: an enormous row count would abort
+        // the process while building the codes vector (R2 covered only
+        // the float entry point).
+        let n_elements = a.nrows().checked_mul(a.ncols()).ok_or_else(|| {
+            PyValueError::new_err("from_binary: matrix shape overflow (nrows * ncols)")
+        })?;
+        if n_elements > MAX_MATRIX_ELEMENTS {
+            return Err(PyValueError::new_err(format!(
+                "from_binary: matrix has {n_elements} elements (> {MAX_MATRIX_ELEMENTS} cap)"
             )));
         }
         // Element-wise copy (not a flat as_slice().unwrap()): tolerates

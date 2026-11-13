@@ -32,9 +32,19 @@ def verify_wet_gzip(path: str) -> None:
     Crawl ships for WET files.
     """
     try:
+        if os.path.getsize(path) == 0:
+            raise OSError("empty file")
+        saw_payload = False
         with gzip.open(path, "rb") as f:
-            while f.read(1 << 20):
-                pass
+            while True:
+                chunk = f.read(1 << 20)
+                if not chunk:
+                    break
+                saw_payload = True
+        if not saw_payload:
+            # A gzip of zero bytes is a valid stream but never a WET file:
+            # a 200-with-empty-body mirror must be a failed download.
+            raise OSError("gzip stream has no payload")
     except (OSError, EOFError) as e:
         raise OSError(f"{path}: gzip verification failed: {e}") from e
 
@@ -111,14 +121,24 @@ def fetch_one(url: str, out_dir: str) -> tuple[str, int]:
                 else:
                     raise OSError(f"unexpected HTTP {r.status} for {url}")
                 if mode == "ab":
-                    # Drop anything past the resume offset so the append can
-                    # never duplicate a partial prefix.
+                    # Defensive: if a concurrent writer appended between
+                    # the size read and the open, cut back to the resume
+                    # offset so the append cannot duplicate a prefix.
                     _truncate(path, have)
+                base = have if mode == "ab" else 0
+                written = 0
                 with open(path, mode) as f:
                     while True:
                         chunk = r.read(1 << 20)
                         if not chunk:
                             break
+                        written += len(chunk)
+                        if total is not None and base + written > total:
+                            # A hostile/broken mirror must not fill the
+                            # disk past the object it advertised.
+                            raise OSError(
+                                f"{url}: response exceeds Content-Length {total}"
+                            )
                         f.write(chunk)
             if is_gzip:
                 try:
