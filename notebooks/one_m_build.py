@@ -2,9 +2,9 @@
 
 Open with:  `marimo edit notebooks/one_m_build.py`
 Mode: attended, ~2.5 h on the RTX Pro 6000 box.
-Each cell is a single runnable stage; kill any one cell and resume from the
-artifact it committed ($HOME at /marimo/exa-at-home, nothing else survives
-the wipe).
+Each cell is a single runnable stage. Stages run with force=False, so a
+killed cell reuses the artifact it committed (or resumes a partial embed);
+$HOME at /marimo/exa-at-home is all that survives the wipe.
 """
 
 import marimo
@@ -72,24 +72,43 @@ def _():
 
 @app.cell
 def _(ROOT):
+    import shutil
+    import sys
+
+    sys.path.insert(0, ROOT)
+    import ann_core  # noqa: F401  (fails early if box_setup.sh was skipped)
+    import torch
+
+    assert torch.cuda.is_available(), "CUDA is not available on this box"
+    free_gb = shutil.disk_usage(ROOT).free / 1e9
+    print(
+        f"ann_core OK; GPU: {torch.cuda.get_device_name(0)}; "
+        f"free disk: {free_gb:.0f} GB"
+    )
+    assert free_gb > 100, f"only {free_gb:.0f} GB free; need >100 GB for the 1M run"
+
+
+@app.cell
+def _(ROOT):
     import os
     import sys
 
     sys.path.insert(0, ROOT)
     from scripts.run_pipeline import stage_download, stage_fetch
 
-    stage_fetch(
+    urls = stage_fetch(
         "CC-MAIN-2026-34",
         130,
         os.path.join(ROOT, "wet_urls.txt"),
-        force=True,
+        force=False,
         verbose=True,
     )
+    assert len(urls) == 130, f"expected 130 WET URLs, got {len(urls)}"
     stage_download(
         os.path.join(ROOT, "wet_urls.txt"),
         os.path.join(ROOT, "data/wet_130wet"),
         workers=16,
-        force=True,
+        force=False,
         verbose=True,
     )
     print("DONE: fetch + download")
@@ -105,7 +124,7 @@ def _(ROOT):
 
     src = os.path.join(ROOT, "data/wet_130wet")
     dst = os.path.join(ROOT, "docs_130wet.jsonl")
-    res = stage_ingest(src, dst, force=True, verbose=True)
+    res = stage_ingest(src, dst, force=False, verbose=True)
     print("INGEST DONE:", res)
 
 
@@ -126,7 +145,7 @@ def _(ROOT):
         ids,
         batch=1024,
         chunk=8192,
-        force=True,
+        force=False,
         verbose=True,
         show_progress=True,
         resume=True,
@@ -149,7 +168,7 @@ def _(ROOT):
         os.path.join(ROOT, "index_130wet"),
         k=10000,
         use_filter=True,
-        force=True,
+        force=False,
         verbose=True,
     )
     print("INDEX DONE:", shape)
@@ -170,7 +189,7 @@ def _(ROOT):
         200,
         queries_path=os.path.join(ROOT, "q_130wet.jsonl"),
         gt_path=os.path.join(ROOT, "gt_130wet.jsonl"),
-        force=True,
+        force=False,
         verbose=True,
     )
     print("QUERIES/GT DONE:", res)
@@ -178,9 +197,64 @@ def _(ROOT):
 
 @app.cell
 def _(ROOT):
+    """Anchor the golden 50 questions to the SAME pages in the 1M haystack.
+
+    E3's questions are tied to target pages by index. Re-sampling targets
+    from a new corpus would pair each question with a different page, so
+    the G2 number would be meaningless. The toy E3 result records the 50
+    target ids; map those ids into the 1M docs and pre-write the target
+    file run_e3 expects (targets_path_for uses the docs hash).
+    """
+    import json
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, ROOT)
+    from scripts.run_e3 import docs_fingerprint, targets_path_for
+
+    docs = Path(ROOT) / "docs_130wet.jsonl"
+    toy = json.loads((Path(ROOT) / "eval/e3_result_toy_20261021.json").read_text())
+    want = {r["target"] for r in toy["rows"]}
+    found = {}
+    with open(docs, encoding="utf-8") as f:
+        for line in f:
+            d = json.loads(line)
+            if d["id"] in want:
+                found[d["id"]] = d
+
+    rows, missing = [], []
+    for r in toy["rows"]:
+        d = found.get(r["target"])
+        if d is None:
+            missing.append(r["target"])
+            continue
+        body = " ".join((d.get("text") or "").split())
+        rows.append(
+            {
+                "n": r["n"],
+                "id": d["id"],
+                "url": d.get("url", ""),
+                "text": body[:320],
+            }
+        )
+    assert not missing, (
+        f"{len(missing)} toy target ids are not in docs_130wet.jsonl; "
+        "the 1M slice must include the toy pages for a valid G2 re-anchor"
+    )
+    fp = docs_fingerprint(docs)
+    out = targets_path_for(docs, fp)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(rows, indent=1))
+    print(f"anchored {len(rows)} golden targets -> {out}")
+    return out
+
+
+@app.cell
+def _(ROOT, anchored):
     import os
     import sys
 
+    assert anchored.exists(), "target anchor cell did not run"
     sys.path.insert(0, ROOT)
     from scripts.e2e_latency import main as e2e_main
     from scripts.gate import main as gate_main
@@ -216,30 +290,55 @@ def _(ROOT):
     assert e2e_main(base) == 0
     import glob
 
-    sweep_main(
-        [
-            "--index",
-            os.path.join(ROOT, "index_130wet"),
-            "--queries",
-            os.path.join(ROOT, "q_130wet.jsonl"),
-            "--gt",
-            os.path.join(ROOT, "gt_130wet.jsonl"),
-            "--nprobe",
-            "8",
-            "16",
-            "--top-coarse",
-            "50",
-            "100",
-            "--max-pair-tokens",
-            "64",
-            "--batch-size",
-            "32",
-            "--ledger",
-            os.path.join(ROOT, "runs.jsonl"),
-        ]
+    assert (
+        sweep_main(
+            [
+                "--index",
+                os.path.join(ROOT, "index_130wet"),
+                "--queries",
+                os.path.join(ROOT, "q_130wet.jsonl"),
+                "--gt",
+                os.path.join(ROOT, "gt_130wet.jsonl"),
+                "--nprobe",
+                "8",
+                "16",
+                "--top-coarse",
+                "50",
+                "100",
+                "--max-pair-tokens",
+                "64",
+                "--batch-size",
+                "32",
+                "--out",
+                os.path.join(ROOT, "sweeps"),
+                "--ledger",
+                os.path.join(ROOT, "runs.jsonl"),
+            ]
+        )
+        == 0
     )
     sweeps = sorted(glob.glob(os.path.join(ROOT, "sweeps") + "/*"))
     te = sweeps[-1]
+
+    # G2 first: the gate reads eval/e3_result.json, so E3 must run before it.
+    # Pass the 1M index/docs explicitly — run_e3 defaults to the toy index/.
+    e3_index = os.path.join(ROOT, "index_130wet")
+    e3_docs = os.path.join(ROOT, "docs_130wet.jsonl")
+    e3_out = os.path.join(ROOT, "eval/e3_result.json")
+    assert (
+        run_e3_main(
+            [
+                "--index",
+                e3_index,
+                "--docs",
+                e3_docs,
+                "--out",
+                e3_out,
+            ]
+        )
+        == 0
+    )
+
     rc = gate_main(
         [
             "--index",
@@ -251,7 +350,7 @@ def _(ROOT):
             "--pred",
             os.path.join(te, "pred_np8_tc50_pt64_b32.jsonl"),
             "--e3-result",
-            os.path.join(ROOT, "eval/e3_result.json"),
+            e3_out,
             "--budget-ms",
             "100",
             "--json",
@@ -261,7 +360,6 @@ def _(ROOT):
     )
     print("GATE EXIT:", rc)
     assert rc == 0
-    run_e3_main()
     print("DONE gate+sweep+E3")
 
     import tarfile
@@ -270,17 +368,29 @@ def _(ROOT):
     with tarfile.open(out, "w:gz") as t:
         for p in [
             "runs.jsonl",
-            "index_130wet",
+            "wet_urls.txt",
+            "index_130wet/manifest.json",
             "q_130wet.jsonl",
             "gt_130wet.jsonl",
-            "vecs_130wet.npy",
-            "ids_130wet.json",
             "eval/e3_result.json",
             "eval/e3_result_toy_20261021.json",
+            "eval/questions_toy_20261021.json",
         ]:
             full = os.path.join(ROOT, p)
             if os.path.exists(full):
                 t.add(full, arcname=p)
+        # The sweep directory is the evidence for the 1M recall/latency
+        # cells: grid.json + one pred file per combo + sweep.log.
+        t.add(te, arcname=os.path.relpath(te, ROOT))
+        # Corpus-specific E3 target sample (name embeds the docs hash).
+        for full in glob.glob(
+            os.path.join(ROOT, "eval/sampled_targets.docs_130wet.*.json")
+        ):
+            t.add(full, arcname=os.path.relpath(full, ROOT))
+        # The full index_130wet/ (codes + lists + store) and vecs_130wet.npy
+        # are large and derived, so they are NOT in the evidence tar. Rebuild
+        # from wet_urls.txt + this repo, or archive the index separately if a
+        # serving copy is needed.
     print("SNAPSHOT:", out)
 
 
