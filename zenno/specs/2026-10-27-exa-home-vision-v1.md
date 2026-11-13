@@ -57,3 +57,26 @@ engineering on one GPU*, not replica-scale.
 4. Tier-2 real-model smoke test.
 5. Ingest URL dedup as a disk pass (P0 ingest throughput).
 6. All P0 thread/process audit findings.
+
+---
+
+## Spec status note (2026-11-13 — docs-truth pass, no re-lock)
+
+The decisions above stand. Two references in the acceptance list no longer
+point at real things, and one number is stale — recorded here so the spec and
+the repo agree without rewriting a locked user decision:
+
+- **Acceptance 4 cites `VISION.md`** — that file does not exist; its role is
+  filled by [`ROADMAP.md`](../../ROADMAP.md) §1 (ultimate goal, "what we are
+  deliberately NOT doing"). Read `ROADMAP.md` as the map this acceptance item
+  means.
+- **Acceptance 3's "tier-0 (112/112) green"** is stale: the Tier-0 suite is
+  **174 passed, 7 deselected** (`pytest -m "not cloud_only"`), plus 28 Rust
+  tests. `ruff check` / `ruff format --check` / `cargo fmt --check` are green
+  and enforced in CI on every push.
+- **Acceptance 1's `config.yaml`** — the shipped example is
+  `config.example.json` (JSON and YAML are both accepted by the strict
+  `config_loader`; `config.yaml` never shipped).
+- Acceptance 2 holds: every serving knob reads `exa_home/config.py`
+  (`OPERATING_POINT`), `runs.jsonl` is the ledger, and `--config` is the only
+  way to override the serving operating point.

@@ -4,7 +4,10 @@
 read `ROADMAP.md` and `WORKPLAN.md`. Together they are the complete state
 of the project, what it is, what works, what is open, and what to do next.
 
-Last updated: 2026-11-12. Latest commit: `7c80bd7` (audit/fix-all-findings branch, local).
+Last updated: 2026-11-13. Latest commit: `0a2072a` — **merged into `main`
+(fast-forward) and pushed to `origin/main`**; the temporary
+`audit/fix-all-findings` branch was deleted after the merge. All work is on
+`main` now.
 
 ---
 
@@ -30,8 +33,10 @@ decisions).
 4. The knowledge is written down — LEARNINGS.md holds principles that outlive
    the code.
 
-**Scale ladder:** 1M (milestone) → 5M (headline) → 10M (stretch). 20M is out
-on RAM/disk, not GPU. Web-scale stays out of scope.
+**Scale ladder:** 1M (milestone) → 5M (headline, and the spec's stretch target —
+`zenno/specs/2026-10-27-exa-home-vision-v1.md`). 10M fits the box on paper
+(WORKPLAN capacity table) but is outside the committed ladder. Web-scale stays
+out of scope.
 
 ---
 
@@ -108,7 +113,7 @@ zenno/           Design spec + implementation plan (historical, banner-marked)
 | Measurement harness | Works | `sweep.py` (4-D grid, timestamped artifacts, full-config ledger), `e2e_latency` (p50/p99 + waterfall integrity), `score_relevance` (judged precision@10) |
 | Notebook (molab) | Works | self-bootstrapping, literate, Plotly, ran the whole session unattended-ish |
 | CI | Green | ruff 0.17, pytest, cargo test, cargo fmt — every push |
-| Ledger | 31 rows | runs.jsonl; toy/81k-document measurements plus index_4wet gate rows |
+| Ledger | 32 rows (28 real + 4 synth smoke rows, 0 one-million rows) | runs.jsonl; toy/81k-document measurements plus index_4wet gate rows — the 2026-10-25 1M rows were never committed |
 
 ### The numbers
 
@@ -149,7 +154,7 @@ zenno/           Design spec + implementation plan (historical, banner-marked)
 | Bridge | PyO3 via maturin (in-process FFI) | Zero per-query IPC overhead. |
 | Corpus | WET files, `CC-MAIN-2026-34` | Pre-extracted text; density-ranked via the columnar index (explicit per-file list — CloudFront 404s directory globs). Toy uses the unranked slice. |
 | Store | Byte-offset index at build time | Killed a 1400ms cold-read wall misattributed to the GPU. |
-| Scale ladder | 1M → 5M (headline) → 10M (stretch) | 5M fits comfortably in 160GB RAM / 503GB disk; 20M is out on RAM/disk, not GPU. |
+| Scale ladder | 1M (milestone) → 5M (headline + spec stretch) | 5M fits comfortably in 160GB RAM / 503GB disk; 10M fits on paper (WORKPLAN table) but is outside the committed ladder. |
 | Embed throughput | fp16 + batch 1024 (measured: +3.4%) | The GPU is not the bottleneck — the CPU tokenizer is. Pre-tokenizing offline is the real lever. |
 | Reranker decision | Pre-registered rule: win → keep, tie → drop to flag, lose → drop | E3 fired on MRR → keep. The rule prevented post-hoc rationalization. |
 
@@ -192,7 +197,10 @@ Rules learned the hard way:
 - `eval/E3_PROTOCOL.md` — the D1 experiment design + cells.
 - `runs.jsonl` — the source of truth for every measurement.
 
-**Four gates (defined, not yet implemented as a command):**
+**Four gates — implemented in `scripts/gate.py`** (exit 0 = hard gates pass, 1 =
+a hard gate regressed, 2 = usage error; G4 is advisory). CI runs `gate.py
+--synth` on every push; the **full real-index gate is still
+manual/cloud-only** (HANDOFF §5 above).
 
 | Gate | Metric | Toy baseline | Rule at 1M |
 |---|---|---|---|
@@ -233,7 +241,7 @@ literate markdown + library imports + Plotly graphs.
 python -m venv .venv && source .venv/bin/activate
 pip install -e .[dev]
 cd crates/ann-core && maturin develop && cd ../..
-python -m pytest tests/ -m "not cloud_only" -q   # 108 passed
+python -m pytest tests/ -m "not cloud_only" -q   # 174 passed, 7 deselected
 cargo test -p ann-core                            # 28 passed
 ```
 
@@ -302,7 +310,7 @@ comparison; density-ranked English as a separate run. Toy ASCII fraction:
 9. **`top_k` means two things** in the Rust binding (coarse count vs final
    count). Renamed to `n_coarse` in `IvfIndex.search`. `AnnIndex` still
    uses `top_k` (final count). Don't confuse them.
-10. **The test suite's `cloud_only` marker** skips 6 tests locally. Run with
+10. **The test suite's `cloud_only` marker** skips 7 tests locally. Run with
     `-m "not cloud_only"` always.
 11. **`ruff` 0.17.0 is pinned** — local and CI must match. Use `.venv/bin/ruff`.
 12. **`cargo fmt --check` runs in CI** on `crates/ann-core`. Run it before
@@ -322,7 +330,8 @@ comparison; density-ranked English as a separate run. Toy ASCII fraction:
 
 | Artifact | What it is | Where |
 |---|---|---|
-| `runs.jsonl` | 21-row ledger: p50/p99 + stages + breakdown + recall + full config | repo root |
+| `runs.jsonl` | 32-row ledger (28 real + 4 synth smoke rows): p50/p99 + stages + breakdown + recall + full config | repo root |
+| `sweeps/20261025-130647/`, `sweeps/20261025-161823/` | **1M sweep grids (grid.json only)** — box run 2026-10-25; their `runs.jsonl` rows were never committed, so they are not reproducible | repo |
 | `sweeps/20261011-151336/` | Pair-tokens sweep: grid.json + 2 pred files + sweep.log | repo |
 | `sweeps/20261021-161945/` | Batch-size sweep: grid.json + 3 pred files + sweep.log | repo |
 | `eval/review_toy_20261021.json` | 10 queries + 200 blinded entries (A/B shuffled) | repo |
@@ -367,7 +376,7 @@ comparison; density-ranked English as a separate run. Toy ASCII fraction:
 python -m venv .venv && source .venv/bin/activate
 pip install -e .[dev]
 cd crates/ann-core && maturin develop && cd ../..
-python -m pytest tests/ -m "not cloud_only" -q   # 108 passed
+python -m pytest tests/ -m "not cloud_only" -q   # 174 passed, 7 deselected
 cargo test -p ann-core                            # 28 passed
 ```
 
@@ -411,19 +420,24 @@ re-run the gate live.
 
 ---
 
-## 16. Immediate next step (post-1 M)
+## 16. Immediate next step (post-audit, post-merge)
 
-Use **Lane C work already on branch PRs**, not code changes mid-run:
-- `feat/config-loader-seam` (core contract for one YAML, awaiting merge gate)
-- `perf/ingest-disk-url-dedup` (storage-safe, tested)
-- `refactor/store-thread-safety` (merged but re-pushed)
+The audit wave (24 commits, 2026-11-12/13) is merged into `main` and pushed;
+the roadmap items it did NOT touch are unchanged and still open, in order:
 
-The M1 policy is **publish first, scale later**: record the -0.10 drop rule,
-the tc100 over-budget gate, and the G2 re-derivation set before starting 5 M.
+1. **Re-anchor the golden 50-question set into the 1M haystack** (`eval/E3_PROTOCOL.md`
+   §D1 — "the scale story is answering"). This is the number that makes 1M a *scale*
+   claim rather than a rebuild; without it, G2 at 1M is simply unmeasured.
+2. **Commit the 1M ledger rows** (or re-run the 1 M build): `runs.jsonl` has 0
+   one-million rows, so every 1M figure in the docs is currently box-only evidence.
+3. **Then 5M** (K=30k path is in `docs/RUNBOOK.md`), after ingest parallelization
+   (WORKPLAN item 5b) lands with a measured docs/s row.
+4. **MCP benchmark at 1M** (WORKPLAN item 9) — the shipped surface has never been
+   measured against a real index.
 
-(Any leftover “fix `gate.py` option” patching on the 1 M data must target
-the 2026-10-25 corpus, not the 81 k artifact set.)
+The M1 policy still holds: **publish first, scale later** — record the −0.10 drop
+rule, the tc=100 over-budget gate, and the G2 re-derivation set before starting 5 M.
 
-The E3 protocol (for the reranker decision, already decided) lives in
-`eval/E3_PROTOCOL.md`. The next experiment that needs the box is the
-pre-tokenize diagnostic — I'll write the cell when asked.
+The E3 protocol lives in `eval/E3_PROTOCOL.md`; the 1M session plan is
+`zenno/plans/2026-10-27-item-4-1m-session-plan.md`; the deferred-measurement
+ledger is `docs/RUNBOOK.md` §6 (items (a)–(e), all still open).

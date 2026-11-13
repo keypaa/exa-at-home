@@ -55,10 +55,22 @@
   corpus-provenance and trust-boundary posture.
 
 ### Docs
+- Docs-truth pass (2026-11-13): contradictions between README / WORKPLAN /
+  HANDOFF / ROADMAP / EXPERIMENTS / the vision spec resolved against the
+  repo as it actually is — 1M numbers restated as box-only and *not*
+  reproducible (0 one-million rows in `runs.jsonl`), WORKPLAN TODO items 3/4/5/6
+  marked done (gates ship in `scripts/gate.py`, the 1M session plan exists, the
+  1M build/sweep ran 2026-10-25 without committed ledger rows), test counts
+  corrected (174 passed / 7 deselected; 7 `cloud_only`), ledger row count (32),
+  the 10M-vs-5M stretch conflict settled on the spec (5M), the dangling
+  `VISION.md` acceptance reference mapped to `ROADMAP.md`, README's stdio/HTTP
+  MCP examples fixed (`--port` removed from stdio; `--help` removed from the
+  HTTP line; gate-vs-integrity duty stated), and `cloud_only` CI coverage
+  described accurately (`|| true`, no GPU/box on hosted runners).
 - README: the "one config" paragraph now states the reality — `config.py` is
   the single source of truth and `config_loader.py` (Lane B) is a strict,
   optional hardware-profile adaptation layer consumed only via `--config`;
-  serving/auth flags documented; test counts corrected (167 pytest).
+  serving/auth flags documented; test counts corrected.
 - Added `docs/MCP_API.md` (tool schema, flags, untrusted-content contract),
   `.github/ISSUE_TEMPLATE/`, `.github/PULL_REQUEST_TEMPLATE.md`.
 - `SECURITY.md` rewritten around the shipped posture (loopback default,

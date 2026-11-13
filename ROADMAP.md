@@ -13,8 +13,8 @@ comes next, and what it is ultimately for.
 Concretely, that means four things, and all four have to be true:
 
 1. **It works.** The full funnel (embed → binary IVF → rerank → snippet) over
-   **5M** real Common Crawl pages (1M is the milestone, 5M the headline,
-   10M a stretch), served over MCP, at a p50 inside the 100ms budget.
+   **5M** real Common Crawl pages (1M is the milestone, 5M the headline and the
+   stretch target), served over MCP, at a p50 inside the 100ms budget.
 2. **Every decision is measured.** No design choice in the code exists
    because it felt right. Each has a row in `EXPERIMENTS.md` and a
    measurement in `runs.jsonl` that someone else can re-run.
@@ -83,10 +83,11 @@ visible rather than assumed.
 
 | # | Item | Why it matters | Cost |
 |---|---|---|---|
-| 1 | Resumable chunked embed + chunked centroid training | Makes a 37-min GPU run survivable on a box that can vanish | small |
+| 1 | Resumable chunked embed + chunked centroid training | **Done** (`scripts/embed_resumable.py`, verified by SIGKILL-resume on the box). Makes a 37-min GPU run survivable on a box that can vanish | — |
 | 2 | The 1M session plan (written, like E3's) | One paste, no improvisation; pre-registered acceptance criteria | ~1h of my time, then ~1.5h attended box time |
-| 3 | 1M build + gate + sweep | The scale experiment itself | box time |
-| 4 | **The four gates** (ANN fidelity, answer coverage, latency, relevance) | "Valid recall" means a thresholded, repeatable check. WORKPLAN.md now defines all four with toy baselines and pre-registered drop budgets; they still need implementing as one command | small |
+| 3 | 1M build + gate + sweep | **Done on the box 2026-10-25** — results in `EXPERIMENTS.md` M9, but the ledger rows were never committed, so it is not yet reproducible from this repo (item 3b) | box time |
+| 3b | **1M reproducibility + G2 at 1M**: commit the 1M ledger rows (or re-run the build), then re-anchor the golden 50-question set into the 1M haystack (`eval/E3_PROTOCOL.md` §D1) | Without this, every 1M number in the docs is box-only evidence and the "scale story is answering" question is unanswered | box time + a written session plan |
+| 4 | **The four gates** (ANN fidelity, answer coverage, latency, relevance) | "Valid recall" means a thresholded, repeatable check. **Done:** `scripts/gate.py` implements all four with toy baselines + pre-registered drop budgets, exits non-zero on a regression, and CI runs `--synth` on every push. What remains: the real-index gate (needs the box) | small |
 | 5 | A relevance metric that scales | Our id-overlap metric is not a quality metric (LEARNINGS §4/§13). The human-judged eval is n=50 and doesn't scale — this is the next *instrument* we need | medium |
 | 6 | The serving tier (`lite` / `auto`) | The Exa-3.0 mirror: coarse-only vs coarse+rerank, one switch, one measured frontier. D1 just made this concrete: both paths are now validated | medium |
 | 7 | The MCP server as a real product | It starts now (`python -m exa_home.mcp_server`) but has never been benchmarked against the real index | small-medium |
@@ -103,8 +104,8 @@ embedder, so the binary codes lose less).
 Web-scale (billions), GPU ANN, live crawling, freshness pipelines,
 auth/billing/multi-tenancy, a UI, and training our own foundation
 embedding model. The scale ladder stops at what one 32 GiB / RTX Pro 6000
-box can hold: **1M → 5M → 10M**, and 20M is out on RAM and disk, not on
-the GPU. All of these are explicitly out of scope (spec §3) —
+box can hold: **1M → 5M** (the spec's stretch target); 10M is out on RAM and
+disk, not on the GPU. All of these are explicitly out of scope (spec §3) —
 saying so here is what keeps the project from expanding into a
 twelve-month programme we never finish.
 

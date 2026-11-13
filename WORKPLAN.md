@@ -5,11 +5,13 @@ designed, decided, *measured*, and recorded. "Measured" means a number in
 `runs.jsonl` (with full config) or a row in `EXPERIMENTS.md` — not a
 plausible-sounding claim in chat.
 
-**Current focus:** 1M is **measured, clean, and copy-able** — p50 75.562 ms,
-exact-id@10 0.359 (passing the keep/drop rule at the −0.10 budget), K=10 k.
-The next canonical step is the **golden question set on this exact haystack**
-(E3 §D1 “the scale story is answering”); then 5 M is pure measured work, not a
-scientific gamble.
+**Current focus:** 1M is **measured on the box (2026-10-25) but NOT reproducible
+from this repo** — p50 75.562 ms, exact-id@10 0.359 (inside the pre-registered
+−0.10 budget), K=10 k. Its ledger rows were never committed to `runs.jsonl`
+(0 one-million rows today), so the job now is: **re-run the 1 M build and commit
+the ledger rows**, then the **golden question set on this exact haystack**
+(E3 §D1 “the scale story is answering”). After those two, 5 M is pure measured
+work, not a scientific gamble.
 
 The map of the whole project: [`ROADMAP.md`](ROADMAP.md).
 
@@ -22,11 +24,11 @@ The map of the whole project: [`ROADMAP.md`](ROADMAP.md).
 | 1 | **Embed throughput**: fp16 + real GPU batch + length bucketing + explicit `max_seq_length` | **done (M8)** | measured 442 → 457 docs/s (+3.4%); **the embedder is CPU-bound, not GPU-bound** (fp16 + 32→1024 batches barely move it). The real lever is pre-tokenizing offline; see item 1b. |
 | 1b | **Embed diagnostic + pre-tokenize (M9)** | **done** | measured CPU-tokenize = 50.4% of the wall; manual single-pass forward landed +41.6% (636 → 901 docs/s, `exa_home/embed.py`, commit `a67f7d8`). Max-seq-length sweep deferred (a separate M10 row). |
 | 2 | **Resumable chunked embed** (per-chunk state + resume) | **done** | `scripts/embed_resumable.py` + `stage_embed` wrapper (`afe4012`+). Verified on the box: SIGKILL at 57344 rows → cold resume completes (81380 rows), idempotent re-run identical hash (see HANDOFF tail). |
-| 3 | **The four gates** (below) — thresholds + one command | to do | `scripts/gate.py` exits non-zero on a regression; drop budgets pre-registered |
-| 4 | **1M session plan** (written, like E3's) | to do | one paste, pre-registered acceptance criteria, no improvisation |
-| 5 | **1M build** (unranked first-130 WET — the same selection rule as the toy) | to do | index/ built, gate run, 81k-vs-1M comparison reported. **Ingest is now the long pole** (2473 docs/s = 6.7 min @1M) — parallelize before 5M |
+| 3 | **The four gates** (below) — thresholds + one command | **done** | `scripts/gate.py` implements G1–G4 with pre-registered drop budgets and exits non-zero on a regression (CI runs `--synth` on every push). The full **real-index** gate is still manual/cloud-only — that is the remaining piece |
+| 4 | **1M session plan** (written, like E3's) | **done** | `zenno/plans/2026-10-27-item-4-1m-session-plan.md` — one paste, pre-registered acceptance criteria, no improvisation |
+| 5 | **1M build** (unranked first-130 WET — the same selection rule as the toy) | **done on the box 2026-10-25; not reproducible** | index/ built (2 576 778 docs, K=10 k), gate + sweep run, 81k-vs-1M comparison in `EXPERIMENTS.md` M9 — **but the ledger rows were never committed**. Redo/commit before citing. **Ingest is the long pole for 5M** (2473 docs/s) — parallelize first (item 5b) |
 | 5b | **Ingest throughput**: parse in worker processes, write shards instead of one file | to do | docs/s measured; 5M ingest under ~5 min |
-| 6 | **1M sweep**: nprobe × top_coarse × K — the scale curve | to do | curves in `runs.jsonl`; the `nprobe × (N/K)` latency model checked against measurement |
+| 6 | **1M sweep**: nprobe × top_coarse × K — the scale curve | **partly done on the box 2026-10-25; not committed** | `EXPERIMENTS.md` M9 records tc=50 vs tc=100 over-budget and np8 → np16 recall; the full curve is not in `runs.jsonl` (no rows). Redo/commit with the ledger |
 | 7 | **5M build** (stretch) | to do | only if 1M is clean and the box has the disk |
 | 8 | **`lite`/`auto` serving tier** | to do | one switch, both paths benchmarked, frontier plotted |
 | 9 | MCP server benchmarked against a real index | to do | p50 + recall for the shipped surface, not just the harness |
@@ -73,9 +75,11 @@ Memory/time model for the box (4 CPU, 32 GiB RAM, RTX Pro 6000):
 ¹ after item 1 — today's 442 docs/s on 3GB of a 96GB GPU leaves 5–8× on
 the table.
 
-**So: 1M is the milestone, 5M is the headline, 10M is a stretch**, and 20M
-is out on this box (RAM and disk, not GPU). That is a "mini-Exa" worth
-having; web-scale stays explicitly out of scope.
+**So: 1M is the milestone, 5M is the headline and the spec's stretch target**
+(`zenno/specs/2026-10-27-exa-home-vision-v1.md`); 10M fits on paper (table
+above) but sits outside the committed ladder, and 20M is out on this box (RAM
+and disk, not GPU). That is a "mini-Exa" worth having; web-scale stays
+explicitly out of scope.
 
 **The latency model that matters at scale:** the ANN scans
 `nprobe × (N/K)` documents per query. At 81k/K=1024 that is 632 docs; at

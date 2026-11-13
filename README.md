@@ -8,17 +8,17 @@ Target box: RTX PRO 6000 Blackwell (96GB VRAM), 160GB RAM. ANN stays on CPU
 on purpose — faithful to how Exa does it; the GPU serves query embedding +
 rerank only.
 
-**1 M box measurement (2 576 778 indexed docs, 130 WET, K=10 000, cc-main 2026-34): total
-p50 75.562 ms / p99 131.151 ms vs the 100 ms budget — PASS.** Ledger-backed:
-**G1 0.359 vs ≥ 0.1885**, **G3 p50 75.562, G4 advisory 0.350/0.380.**
-These 1 M figures are box measurements; their ledger rows are **not committed**
-to `runs.jsonl`, so they are not reproducible from this repo as it stands
-(see the audit report, finding D2). Re-measure and commit the ledger rows
-before citing these as reproduced results.
-The G2 question-coverage baseline measured on this corpus is not comparable
-to the toy (the box G2 result file was a copy of the toy result and has been
-removed — see the audit report, finding D6). Previous toy result was
-43.67 ms (81 k docs, np8 / tc50 / pt64 / b32).
+**1 M box measurement (2 576 778 indexed docs, 130 WET, K=10 000, cc-main 2026-34):
+total p50 75.562 ms against the 100 ms budget — PASS; p99 131.151 ms.** These are
+**box measurements, not repo evidence**: their ledger rows are **not committed** to
+`runs.jsonl` (which currently holds 0 one-million rows), so they are **not
+reproducible from this repo as it stands**. Re-run the 1 M build and commit the
+ledger rows before citing these as reproduced results.
+G1 exact-id recall@10 **0.359** stayed inside the pre-registered −0.10 drop budget
+(81 k reranked baseline 0.2885 → limit 0.1885). There is **no 1 M relevance (G4) or
+answer-coverage (G2) number** — the 50-question set has never been re-anchored into
+the 1 M haystack (see [`eval/E3_PROTOCOL.md`](eval/E3_PROTOCOL.md) §D1). Toy numbers
+below are on the toy corpus and must not be read as 1 M evidence.
 
 **On question-like queries** (50 natural questions, known target pages):
 target recall@10 **0.740** either way, target MRR@10 **0.641 → 0.712** with
@@ -106,7 +106,7 @@ python -m venv .venv && source .venv/bin/activate
 pip install -e .[dev]
 export PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1  # only on Python 3.14 + PyO3 0.22
 cd crates/ann-core && maturin develop && cd ../..
-python -m pytest tests/ -m "not cloud_only" -q   # 167 passed, 7 deselected
+python -m pytest tests/ -m "not cloud_only" -q   # 174 passed, 7 deselected
 cargo test -p ann-core                            # 28 passed
 ```
 
@@ -156,7 +156,7 @@ to `runs.jsonl` — **commit it + `q/gt/pred.jsonl` and push before leaving**
 | Choice | Pick | Why |
 |---|---|---|
 | Embedder | `mxbai-embed-large-v1`, MRL-256 | Native MRL + `truncate_dim=256` + `prompt_name="query"`, Apache-2.0, no custom modeling code (no `trust_remote_code`); Arctic-m-v2.0 unloadable (xformers assert) |
-| Reranker | `ms-marco-MiniLM-L6-v2` | Same NDCG as L12 at ~2x throughput; **measured 0.59 ms/pair** (29.6ms for 50 pairs) — the vendor "6–10ms for 200 pairs" figure is stale, and the `<40ms for 200 pairs` budget test is still an open deferral (RUNBOOK §6a) |
+| Reranker | `ms-marco-MiniLM-L6-v2` | Same NDCG as L12 at ~2x throughput; **measured 0.59 ms/pair** (29.6ms for 50 pairs) — the vendor "6–10ms for 200 pairs" figure is stale, and the `<40ms for 200 pairs` budget test is still an open deferral (RUNBOOK §6, item (a)) |
 | ANN | Rust IVF + 64×16 LUT nibble scoring | 33x over naive bit loop (`lut_scan_2k` 60µs) |
 | Bridge | PyO3 via maturin (in-process FFI) | Zero per-query IPC overhead |
 | Corpus | WET files, `CC-MAIN-2026-34` | Pre-extracted text; density-ranked via the columnar index (explicit per-file list — CloudFront 404s directory globs). **The toy corpus was built from the UNRANKED slice** (no `content_languages=eng` gate) → spam-heavy and multilingual; a density-ranked 1M slice is English-only, so toy numbers do not transfer |
@@ -166,8 +166,11 @@ to `runs.jsonl` — **commit it + `q/gt/pred.jsonl` and push before leaving**
 
 - **Tier-0** (local CI): 100–500 synth docs, hash embeddings, numpy/Rust fakes. Seconds.
 - **Tier-2** (`cloud_only`): 10k toy → 1–5M builds. Real GPU/model/latency.
-  These 7 tests are **not run by any CI job** (they need the box) — see
-  WORKPLAN.md.
+  These 7 tests need the box (GPU + model weights + Common Crawl access). CI
+  has a weekly / `workflow_dispatch` `cloud_only` job, but it runs on a
+  GitHub-hosted runner without GPU or box access and is `|| true` — so
+  cloud_only **results require on-box validation**; only the Tier-0 gates
+  are enforced on every push.
 
 Recall gate: every index change reports recall@10 vs brute-force ground
 truth (`ground_truth.py --queries`, aligned to the gate queries — the
@@ -187,11 +190,11 @@ implements G1–G4 with hardcoded thresholds and CI runs `gate.py --synth`)
 - [x] **Decide the reranker's fate** (WORKPLAN D1, 2026-10-21) — **KEEP**. 50 question-based eval:
   target recall@10 0.740 = 0.740; MRR 0.641 → 0.712 (+0.071, p=0.18, n.s.).
   Question-vs-prefix behaviour (not a coefficient of the default) determines it.
-- [x] **1 M scale exercise complete on the toy path** — unranked 130 WET, 2.58 M docs,
+- [x] **1 M scale exercise complete on the box** (2026-10-25) — unranked 130 WET, 2.58 M docs,
   K=10 k, G1 reranked **0.359** (−0.0705 vs 81 k 0.2885), G3 **p50 75.562 / p99 131.151 ms**,
-  exact-note on `--pred` and `topCoarse` 100 is over-budget. G2 0.00 / 0.00 because the 50
-  committed questions are not each re-anchored into the 1 M haystack; **not a drop in
-  quality claim**.
+  `top_coarse` 100 is over-budget. G2 at 1 M is **unmeasured (0.00 / 0.00 is "not re-anchored",
+  not a quality claim)**: the 50 committed questions are not each re-anchored into the 1 M
+  haystack. **The ledger rows for this run are not committed — see "Measurement status"**.
 - [ ] Waterfall tolerance 10%+2ms; optional answer/similar DAG nodes
 
 ## License
@@ -202,21 +205,30 @@ Apache 2.0 — see [LICENSE](LICENSE).
 
 ```bash
 # stdio (recommended for local agents)
-python -m exa_home.mcp_server --index index/ --port 8000
+python -m exa_home.mcp_server --index index/
 
-# HTTP (serve agents over the box)
-python -m exa_home.mcp_server --index index/ --transport http --port 8080 --help
+# HTTP — loopback by default; --token/EXA_MCP_TOKEN adds bearer auth,
+# --rate-limit caps calls/minute
+python -m exa_home.mcp_server --index index/ --transport http --port 8080
 ```
 
-The server only starts **after** the index has passed `scripts/gate.py` (see below).
-Model weights are cached under `$HF_HOME` / `~/.cache/huggingface`; a cold start
-downloads ~1.3 GiB for mxbai-embed and ~90 MB for the reranker.
+Tool schema, bounds and flags: [`docs/MCP_API.md`](docs/MCP_API.md). Serve an
+index that has passed `scripts/gate.py` — the server itself only verifies
+`index/manifest.json` **integrity** (per-file sha256, fail-fast), it does not
+re-run the gate. Model weights are cached under `$HF_HOME` /
+`~/.cache/huggingface`; a cold start downloads ~1.3 GiB for mxbai-embed and
+~90 MB for the reranker.
 
 ## Measurement status
 
-- **1 M results are pinned** to `runs.jsonl` and `EXPERIMENTS.md` (G1 `0.359`, G3 p50 `75.562`,
-  p99 `131.151 ms`). G2 (target-doc coverage) remains **non-comparable** at 1 M until a fixed
-  50-question set is re-anchored; no 5 M numbers exist yet.
+- **1 M results are box measurements, not repo evidence.** The 1 M build ran on the box
+  2026-10-25 (G1 `0.359`, G3 p50 `75.562` ms / p99 `131.151` ms — see `EXPERIMENTS.md` M9),
+  but **its ledger rows are not committed to `runs.jsonl`**, which currently holds 0
+  one-million-row entries. Until those rows (or a fresh 1 M run) are committed, the numbers
+  are **not reproducible from this repo** — re-run and commit before citing them as evidence.
+  G2 (target-doc coverage) remains **non-comparable** at 1 M until the fixed 50-question
+  set is re-anchored into the 1 M haystack (`eval/E3_PROTOCOL.md` §D1); no 5 M numbers
+  exist yet.
 
 - **5 M runs are deferred** until every PR in the 1 M hardening queue is clean and one
   **soft gate threshold** document is merged with the measured nprobe curve.
