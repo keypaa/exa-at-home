@@ -16,7 +16,7 @@ app = marimo.App()
 @app.cell
 def _():
     import os
-    import sys
+    import sys as _sys
 
     REPO_URL = "https://github.com/keypaa/exa-at-home.git"
 
@@ -64,8 +64,8 @@ def _():
     if not _has_markers(ROOT):
         print("Repo not found; clone it in a terminal, then re-open:", REPO_URL)
     for p in (ROOT, os.path.join(ROOT, "tests")):
-        if p not in sys.path:
-            sys.path.insert(0, p)
+        if p not in _sys.path:
+            _sys.path.insert(0, p)
     print(f"repo root: {ROOT}")
     return ROOT, os
 
@@ -73,9 +73,7 @@ def _():
 @app.cell
 def _(ROOT):
     import shutil
-    import sys
 
-    sys.path.insert(0, ROOT)
     import ann_core  # noqa: F401  (fails early if box_setup.sh was skipped)
     import torch
 
@@ -89,11 +87,7 @@ def _(ROOT):
 
 
 @app.cell
-def _(ROOT):
-    import os
-    import sys
-
-    sys.path.insert(0, ROOT)
+def _(ROOT, os):
     from scripts.run_pipeline import stage_download, stage_fetch
 
     urls = stage_fetch(
@@ -115,34 +109,26 @@ def _(ROOT):
 
 
 @app.cell
-def _(ROOT):
-    import os
-    import sys
-
-    sys.path.insert(0, ROOT)
+def _(ROOT, os):
     from scripts.run_pipeline import stage_ingest
 
     src = os.path.join(ROOT, "data/wet_130wet")
     dst = os.path.join(ROOT, "docs_130wet.jsonl")
-    res = stage_ingest(src, dst, force=False, verbose=True)
-    print("INGEST DONE:", res)
+    ingest_res = stage_ingest(src, dst, force=False, verbose=True)
+    print("INGEST DONE:", ingest_res)
 
 
 @app.cell
-def _(ROOT):
-    import os
-    import sys
-
-    sys.path.insert(0, ROOT)
+def _(ROOT, os):
     from scripts.run_pipeline import stage_embed
 
-    docs = os.path.join(ROOT, "docs_130wet.jsonl")
-    vecs = os.path.join(ROOT, "vecs_130wet.npy")
-    ids = os.path.join(ROOT, "ids_130wet.json")
-    shape, dtype = stage_embed(
-        docs,
-        vecs,
-        ids,
+    embed_docs = os.path.join(ROOT, "docs_130wet.jsonl")
+    embed_vecs = os.path.join(ROOT, "vecs_130wet.npy")
+    embed_ids = os.path.join(ROOT, "ids_130wet.json")
+    embed_shape, embed_dtype = stage_embed(
+        embed_docs,
+        embed_vecs,
+        embed_ids,
         batch=1024,
         chunk=8192,
         force=False,
@@ -150,18 +136,14 @@ def _(ROOT):
         show_progress=True,
         resume=True,
     )
-    print("EMBED DONE:", shape, dtype)
+    print("EMBED DONE:", embed_shape, embed_dtype)
 
 
 @app.cell
-def _(ROOT):
-    import os
-    import sys
-
-    sys.path.insert(0, ROOT)
+def _(ROOT, os):
     from scripts.run_pipeline import stage_index
 
-    shape = stage_index(
+    index_shape = stage_index(
         os.path.join(ROOT, "vecs_130wet.npy"),
         os.path.join(ROOT, "ids_130wet.json"),
         os.path.join(ROOT, "docs_130wet.jsonl"),
@@ -171,18 +153,14 @@ def _(ROOT):
         force=False,
         verbose=True,
     )
-    print("INDEX DONE:", shape)
+    print("INDEX DONE:", index_shape)
 
 
 @app.cell
-def _(ROOT):
-    import os
-    import sys
-
-    sys.path.insert(0, ROOT)
+def _(ROOT, os):
     from scripts.run_pipeline import stage_queries
 
-    res = stage_queries(
+    queries_res = stage_queries(
         os.path.join(ROOT, "docs_130wet.jsonl"),
         os.path.join(ROOT, "vecs_130wet.npy"),
         os.path.join(ROOT, "ids_130wet.json"),
@@ -192,7 +170,7 @@ def _(ROOT):
         force=False,
         verbose=True,
     )
-    print("QUERIES/GT DONE:", res)
+    print("QUERIES/GT DONE:", queries_res)
 
 
 @app.cell
@@ -206,17 +184,15 @@ def _(ROOT):
     file run_e3 expects (targets_path_for uses the docs hash).
     """
     import json
-    import sys
     from pathlib import Path
 
-    sys.path.insert(0, ROOT)
     from scripts.run_e3 import docs_fingerprint, targets_path_for
 
-    docs = Path(ROOT) / "docs_130wet.jsonl"
+    anchor_docs = Path(ROOT) / "docs_130wet.jsonl"
     toy = json.loads((Path(ROOT) / "eval/e3_result_toy_20261021.json").read_text())
     want = {r["target"] for r in toy["rows"]}
     found = {}
-    with open(docs, encoding="utf-8") as f:
+    with open(anchor_docs, encoding="utf-8") as f:
         for line in f:
             d = json.loads(line)
             if d["id"] in want:
@@ -241,21 +217,17 @@ def _(ROOT):
         f"{len(missing)} toy target ids are not in docs_130wet.jsonl; "
         "the 1M slice must include the toy pages for a valid G2 re-anchor"
     )
-    fp = docs_fingerprint(docs)
-    out = targets_path_for(docs, fp)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(rows, indent=1))
-    print(f"anchored {len(rows)} golden targets -> {out}")
-    return out
+    fp = docs_fingerprint(anchor_docs)
+    anchor_out = targets_path_for(anchor_docs, fp)
+    anchor_out.parent.mkdir(parents=True, exist_ok=True)
+    anchor_out.write_text(json.dumps(rows, indent=1))
+    print(f"anchored {len(rows)} golden targets -> {anchor_out}")
+    return anchor_out
 
 
 @app.cell
-def _(ROOT, anchored):
-    import os
-    import sys
-
+def _(ROOT, os, anchored):
     assert anchored.exists(), "target anchor cell did not run"
-    sys.path.insert(0, ROOT)
     from scripts.e2e_latency import main as e2e_main
     from scripts.gate import main as gate_main
     from scripts.run_e3 import main as run_e3_main
@@ -364,8 +336,8 @@ def _(ROOT, anchored):
 
     import tarfile
 
-    out = os.path.join(ROOT, "exa-at-home-handoff.tgz")
-    with tarfile.open(out, "w:gz") as t:
+    tar_out = os.path.join(ROOT, "exa-at-home-handoff.tgz")
+    with tarfile.open(tar_out, "w:gz") as t:
         for p in [
             "runs.jsonl",
             "wet_urls.txt",
@@ -391,7 +363,7 @@ def _(ROOT, anchored):
         # are large and derived, so they are NOT in the evidence tar. Rebuild
         # from wet_urls.txt + this repo, or archive the index separately if a
         # serving copy is needed.
-    print("SNAPSHOT:", out)
+    print("SNAPSHOT:", tar_out)
 
 
 if __name__ == "__main__":

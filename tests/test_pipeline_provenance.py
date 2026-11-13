@@ -303,3 +303,45 @@ def test_stage_index_trains_centroids_inside_the_index_dir(tmp_path, monkeypatch
     pipe.stage_index(str(vecs), str(ids), str(docs), str(out), k=2, sample=2)
     assert seen["centroids"] == str(out / "centroids.npy")
     assert seen["build_centroids"] == seen["centroids"]
+
+
+def test_stage_fetch_retries_transient_http_errors(tmp_path, monkeypatch):
+    """A 503 on the small wet.paths.gz index must not abort a 2.5 h run."""
+    import io
+    import urllib.error
+    import urllib.request
+
+    payload = gzip.compress(
+        b"CC-MAIN-2026-34/wet/one.warc.wet.gz\nCC-MAIN-2026-34/wet/two.warc.wet.gz\n"
+    )
+    calls = {"n": 0}
+
+    class Resp:
+        def __init__(self, raw):
+            self.raw = raw
+
+        def read(self):
+            return self.raw
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def fake_urlopen(req, timeout=0):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            url = getattr(req, "full_url", req)
+            raise urllib.error.HTTPError(url, 503, "busy", {}, io.BytesIO(b""))
+        return Resp(payload)
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(pipe.time, "sleep", lambda _s: None)
+
+    out = tmp_path / "wet_urls.txt"
+    urls = pipe.stage_fetch("CC-MAIN-2026-34", 2, str(out))
+    assert calls["n"] == 3
+    assert len(urls) == 2
+    assert all(u.startswith("https://data.commoncrawl.org/") for u in urls)
+    assert out.read_text().splitlines() == urls

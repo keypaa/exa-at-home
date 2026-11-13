@@ -145,6 +145,7 @@ def stage_fetch(
     Network-dependent (urllib stdlib only). Returns the URL list.
     """
     import gzip
+    import urllib.error
     import urllib.request
 
     t0 = time.perf_counter()
@@ -156,8 +157,38 @@ def stage_fetch(
     url = WET_PATHS_URL.format(crawl=crawl)
     if verbose:
         print(f"[fetch] {url} -> first {n_wet}", flush=True)
-    with urllib.request.urlopen(url, timeout=60) as r:
-        raw = r.read()
+    # Common Crawl occasionally answers 503/502 on the paths index. The file
+    # is small; retry transient failures instead of aborting a 2.5 h run on
+    # the first blip. 2s, 4s, 8s, 16s backoff (5 attempts total).
+    raw = None
+    last_error: Exception | None = None
+    for attempt in range(1, 6):
+        try:
+            with urllib.request.urlopen(url, timeout=60) as r:
+                raw = r.read()
+            break
+        except urllib.error.HTTPError as e:
+            last_error = e
+            if e.code not in (408, 425, 429, 500, 502, 503, 504) or attempt == 5:
+                raise
+            delay = min(30, 2**attempt)
+            print(
+                f"[fetch] HTTP {e.code} from {url}; retry {attempt}/5 in {delay}s",
+                flush=True,
+            )
+            time.sleep(delay)
+        except urllib.error.URLError as e:
+            last_error = e
+            if attempt == 5:
+                raise
+            delay = min(30, 2**attempt)
+            print(
+                f"[fetch] {e} from {url}; retry {attempt}/5 in {delay}s",
+                flush=True,
+            )
+            time.sleep(delay)
+    if raw is None:  # pragma: no cover — loop either breaks or raises
+        raise last_error or OSError(f"could not fetch {url}")
     lines = gzip.decompress(raw).decode("utf-8").splitlines()[:n_wet]
     urls = [f"{BASE}/{line}" for line in lines if line.strip()]
     with open(out, "w") as f:
