@@ -22,7 +22,7 @@ The map of the whole project: [`ROADMAP.md`](ROADMAP.md).
 | # | Item | State | Done when |
 |---|------|-------|-----------|
 | 1 | **Embed throughput**: fp16 + real GPU batch + length bucketing + explicit `max_seq_length` | **done (M8)** | measured 442 → 457 docs/s (+3.4%); **the embedder is CPU-bound, not GPU-bound** (fp16 + 32→1024 batches barely move it). The real lever is pre-tokenizing offline; see item 1b. |
-| 1b | **Embed diagnostic + pre-tokenize (M9)** | **done** | measured CPU-tokenize = 50.4% of the wall; manual single-pass forward landed +41.6% (636 → 901 docs/s, `exa_home/embed.py`, commit `a67f7d8`). Max-seq-length sweep deferred (a separate M10 row). |
+| 1b | **Embed diagnostic + pre-tokenize** | **done** | measured CPU-tokenize = 50.4% of the wall; manual single-pass forward landed +41.6% (636 → 901 docs/s, `exa_home/embed.py`, commit `a67f7d8`). Max-seq-length sweep deferred (a separate future row). |
 | 2 | **Resumable chunked embed** (per-chunk state + resume) | **done** | `scripts/embed_resumable.py` + `stage_embed` wrapper (`afe4012`+). Verified on the box: SIGKILL at 57344 rows → cold resume completes (81380 rows), idempotent re-run identical hash (see HANDOFF tail). |
 | 3 | **The four gates** (below) — thresholds + one command | **done** | `scripts/gate.py` implements G1–G4 with pre-registered drop budgets and exits non-zero on a regression (CI runs `--synth` on every push). The full **real-index** gate is still manual/cloud-only — that is the remaining piece |
 | 4 | **1M session plan** (written, like E3's) | **done** | `zenno/plans/2026-10-27-item-4-1m-session-plan.md` — one paste, pre-registered acceptance criteria, no improvisation |

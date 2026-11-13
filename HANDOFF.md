@@ -26,17 +26,17 @@ decisions).
 - License: Apache 2.0 (see `LICENSE`)
 
 **Ultimate goal (4 conditions, all must hold):**
-1. It works — full funnel over 1M+ real Common Crawl pages, served over MCP,
-   p50 inside 100ms.
+1. It works — full funnel over 5M real Common Crawl pages (1M is the
+   milestone), served over MCP, p50 inside 100ms.
 2. Every decision is measured — no design choice exists because it felt right.
 3. It is professional — modular, linted, CI-gated, tested, documented.
 4. The knowledge is written down — LEARNINGS.md holds principles that outlive
    the code.
 
 **Scale ladder:** 1M (milestone) → 5M (headline, and the spec's stretch target —
-`zenno/specs/2026-10-27-exa-home-vision-v1.md`). 10M fits the box on paper
-(WORKPLAN capacity table) but is outside the committed ladder. Web-scale stays
-out of scope.
+`zenno/specs/2026-10-27-exa-home-vision-v1.md`). 10M and 20M fit the box on
+paper (WORKPLAN capacity table) but are outside the committed ladder.
+Web-scale stays out of scope.
 
 ---
 
@@ -136,7 +136,7 @@ zenno/           Design spec + implementation plan (historical, banner-marked)
 ## 5. What is broken or unproven
 
 - **MCP server**: runnable now (`python -m exa_home.mcp_server --index index/`), but never benchmarked against a real index. No latency/recall numbers for the shipped surface.
-- **Corpus mismatch**: the toy came from the *unranked* slice → spam-heavy, multilingual, 73.7% mostly-ASCII. A 1M density-ranked build is English-only. Toy ≠ 1M corpus.
+- **Corpus mismatch**: the toy came from the *unranked* slice → spam-heavy, multilingual, 73.7% mostly-ASCII. The density-ranked slice (a separate run, not the 2026-10-25 1M build) is English-only. Toy ≠ 1M corpus.
 - **7 `cloud_only` tests** — run only via the new `cloud_only` CI job (workflow_dispatch / weekly schedule); not on every push.
 - **The recall threshold**: `scripts/gate.py` implements G1–G4 with hardcoded thresholds and CI runs `gate.py --synth`; the full real-index gate remains manual/cloud-only.
 - **Scale blockers closed** (filter build RAM, posting lists, ground truth, store hashing) — see the audit wave. Remaining: `stage_ingest`'s URL-dedup set (~660MB at 5M URLs, inherent to URL-second dedup).
@@ -154,7 +154,7 @@ zenno/           Design spec + implementation plan (historical, banner-marked)
 | Bridge | PyO3 via maturin (in-process FFI) | Zero per-query IPC overhead. |
 | Corpus | WET files, `CC-MAIN-2026-34` | Pre-extracted text; density-ranked via the columnar index (explicit per-file list — CloudFront 404s directory globs). Toy uses the unranked slice. |
 | Store | Byte-offset index at build time | Killed a 1400ms cold-read wall misattributed to the GPU. |
-| Scale ladder | 1M (milestone) → 5M (headline + spec stretch) | 5M fits comfortably in 160GB RAM / 503GB disk; 10M fits on paper (WORKPLAN table) but is outside the committed ladder. |
+| Scale ladder | 1M (milestone) → 5M (headline + spec stretch) | 5M fits comfortably in 160GB RAM / 503GB disk; 10M and 20M fit on paper (WORKPLAN table) but are outside the committed ladder. |
 | Embed throughput | fp16 + batch 1024 (measured: +3.4%) | The GPU is not the bottleneck — the CPU tokenizer is. Pre-tokenizing offline is the real lever. |
 | Reranker decision | Pre-registered rule: win → keep, tie → drop to flag, lose → drop | E3 fired on MRR → keep. The rule prevented post-hoc rationalization. |
 
@@ -266,13 +266,14 @@ sliders re-run the gate live.
 
 ## 10. Immediate next steps (state as of 2026-11-13)
 
-The 2026-10-25 list is historical; the live list is §16. Item states:
-1b done (M9: 636 → 901 docs/s); 2 done (`embed_resumable.py`); 3 done
-(`scripts/gate.py` G1–G4, CI runs `--synth`; the real-index gate is
+The 2026-10-25 list is historical; the live list is §15. Item states:
+1b done (636 → 901 docs/s; WORKPLAN item 1b); 2 done (`embed_resumable.py`);
+3 done (`scripts/gate.py` G1–G4, CI runs `--synth`; the real-index gate is
 manual/cloud-only); 4 done (`zenno/plans/2026-10-27-item-4-1m-session-plan.md`);
 5 done on the box, not reproducible (ledger rows uncommitted); 6 partly done
-(sweep cells recorded in EXPERIMENTS, no committed ledger rows); 7–9 remain
-(§16 items 2–4).
+(sweep cells recorded in EXPERIMENTS, no committed ledger rows). Remaining:
+5/6 reproducibility and G2 re-anchoring (§15 items 1–2), 5M (§15 item 3),
+lite/auto (not in §15), and the MCP benchmark (§15 item 4).
 
 **Corpus decision (D2):** unranked first (same rule as toy) for the scale
 comparison; density-ranked English as a separate run. Toy ASCII fraction:
@@ -318,7 +319,7 @@ comparison; density-ranked English as a separate run. Toy ASCII fraction:
 
 ---
 
-## 12. Key artifacts (committed, reproducible)
+## 12. Key artifacts (committed; reproducibility noted per row)
 
 | Artifact | What it is | Where |
 |---|---|---|
@@ -365,38 +366,7 @@ comparison; density-ranked English as a separate run. Toy ASCII fraction:
 
 ---
 
-## 14. How to run things
-
-**Local (Tier-0, seconds, any CPU):**
-```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -e .[dev]
-cd crates/ann-core && maturin develop && cd ../..
-python -m pytest tests/ -m "not cloud_only" -q   # 225 passed, 7 deselected
-cargo test -p ann-core                            # 29 passed
-```
-
-**Cloud box (toy → gate, ~30 min attended):**
-```bash
-python scripts/run_pipeline.py toy
-python scripts/e2e_latency.py --ann ivf --index index/ --queries q.jsonl \
-  --k 10 --budget-ms 100 --embedder real --reranker real \
-  --top-coarse 50 --max-pair-tokens 64 --batch-size 32 \
-  --max-query-tokens 32 --ledger runs.jsonl
-python scripts/sweep.py --index index/ --queries q.jsonl --gt gt.jsonl \
-  --nprobe 8 --top-coarse 50 --max-pair-tokens 32 64 --batch-size 32 \
-  --out sweeps/ --ledger runs.jsonl
-python scripts/measure_recall.py --gt gt.jsonl \
-  --pred sweeps/<ts>/pred_np8_tc50_pt64_b32.jsonl
-```
-
-**The notebook:** `marimo edit notebooks/m5_gate.py` — synth (seconds) then
-toy (~30 min attended). Interactive knobs: `top_coarse`/`nprobe` sliders
-re-run the gate live.
-
----
-
-## 15. The learning principles (LEARNINGS.md)
+## 14. The learning principles (LEARNINGS.md)
 
 1. The bottleneck is never where the spans say — until you've profiled.
 2. A parked Minor on the hot path is a Major with a delay fuse.
@@ -416,7 +386,7 @@ re-run the gate live.
 
 ---
 
-## 16. Immediate next step (post-audit, post-merge)
+## 15. Immediate next step (post-audit, post-merge)
 
 The audit wave (23 commits, 2026-11-12/13; `8e500a4..0a2072a`) is merged
 into `main` and pushed. The docs-consistency pass (`1fa0e60`) and the
@@ -436,8 +406,8 @@ still open, in order:
 4. **MCP benchmark at 1M** (WORKPLAN item 9) — the shipped surface has never been
    measured against a real index.
 
-The M1 policy still holds: **publish first, scale later** — record the −0.10 drop
-rule, the tc=100 over-budget gate, and the G2 re-derivation set before starting 5 M.
+The publish-first policy still holds: **publish first, scale later** — record the −0.10 drop
+rule, the tc=100 over-budget result, and the G2 re-derivation set before starting 5 M.
 
 The E3 protocol lives in `eval/E3_PROTOCOL.md`; the 1M session plan is
 `zenno/plans/2026-10-27-item-4-1m-session-plan.md`; the deferred-measurement
