@@ -130,3 +130,59 @@ def test_real_embedder_encode_docs_shape_order_norm():
     assert np.allclose(np.linalg.norm(v, axis=1), 1.0, atol=1e-3)
     # order is preserved (bucket sorting restores it)
     assert not np.array_equal(v[0], v[1])
+
+
+class _ManualTokenizer:
+    def __init__(self):
+        self.calls = 0
+        self.pad_token_id = 0
+
+    def __call__(self, texts, **kwargs):
+        self.calls += 1
+        assert kwargs.get("padding") is False, "manual path must tokenize once"
+        ids = []
+        for t in texts:
+            i = int(re.search(r"doc-(\d+)", t).group(1))
+            # doc-0 is the longest (10 tokens), doc-5 the shortest (5).
+            ids.append([i + 1] * (10 - i))
+        return {"input_ids": ids}
+
+
+class _ManualModel:
+    def __init__(self):
+        self.tokenizer = _ManualTokenizer()
+        self.batches = []
+
+    def __call__(self, batch):
+        ids = batch["input_ids"]
+        self.batches.append(ids[:, 0].tolist())
+        n = ids.shape[0]
+        out = np.zeros((n, 2), dtype=np.float32)
+        out[:, 0] = ids[:, 0].numpy() - 1
+        out[:, 1] = 1.0
+        return {"sentence_embedding": __import__("torch").from_numpy(out)}
+
+
+def test_manual_encode_docs_tokenizes_once_and_restores_order():
+    """The production path must not tokenize a chunk twice.
+
+    `_token_lengths` + `_encode(padding=True)` used to run the tokenizer
+    twice per chunk and pad every row to the chunk maximum. The manual path
+    tokenizes once, pads each length-sorted batch to its own maximum, and
+    restores input order.
+    """
+    e = Embedder.__new__(Embedder)
+    e._manual = True
+    e.model = _ManualModel()
+    e.dim = 2
+    e.device = "cpu"
+    e.max_seq_length = 512
+    e.batch_size = 2
+
+    texts = [f"doc-{i}" for i in range(6)]
+    v = e.encode_docs(texts)
+    assert e.model.tokenizer.calls == 1
+    # Sorted by token length ascending, in batches of 2: doc-5,4 / 3,2 / 1,0.
+    assert e.model.batches == [[6, 5], [4, 3], [2, 1]]
+    assert v.shape == (6, 2)
+    assert np.allclose(v[:, 0] / v[:, 1], [0, 1, 2, 3, 4, 5])

@@ -61,6 +61,7 @@ def run_embed(
     ids_path: str,
     batch: int | None = None,
     chunk: int | None = None,
+    max_seq_length: int | None = None,
     force: bool = False,
     verbose: bool = False,
     show_progress: bool = False,
@@ -102,7 +103,12 @@ def run_embed(
         try:
             with open(prov_path, encoding="utf-8") as _pf:
                 prov = json.load(_pf)
-            if prov.get("n_docs") == n_docs and prov.get("source_sha256") == src_sha:
+            prov_ms = prov.get("max_seq_length", 512)
+            if (
+                prov.get("n_docs") == n_docs
+                and prov.get("source_sha256") == src_sha
+                and prov_ms == (max_seq_length or 512)
+            ):
                 import numpy as _np
 
                 v = _np.load(vecs_path, mmap_mode="r")
@@ -174,6 +180,17 @@ def run_embed(
                     )
             # fall through to resume with start_rows=rows
 
+    # The model/tokenizer choice is part of the artifact identity: resuming
+    # a 512-token run with max_seq_length=256 would mix representations.
+    requested_ms = max_seq_length or 512
+    if state is not None:
+        state_ms = state.get("max_seq_length")
+        if state_ms is not None and state_ms != requested_ms:
+            raise ValueError(
+                f"{state_path}: max_seq_length {state_ms} != {requested_ms}; "
+                "run with --force"
+            )
+
     rows_start = int(state.get("rows", 0)) if state else 0
     is_fresh = state is None
 
@@ -186,8 +203,16 @@ def run_embed(
                 f"{vecs_part}: missing while state says rows={rows_start}; run --force"
             )
 
-    emb = Embedder()
-
+    if rows_start < n_docs:
+        emb = (
+            Embedder()
+            if max_seq_length is None
+            else Embedder(max_seq_length=max_seq_length)
+        )
+        emb_ms = getattr(emb, "max_seq_length", requested_ms)
+    else:
+        emb = None
+        emb_ms = requested_ms
     mm = None
     rows_done = rows_start
     ids_fp = open(ids_part, "a", encoding="utf-8")  # noqa: SIM115
@@ -205,6 +230,7 @@ def run_embed(
                 "n_docs": n_docs,
                 "chunk": chunk,
                 "batch": batch,
+                "max_seq_length": emb_ms,
                 "source_sha256": src_sha,
                 "rows": r,
             },
@@ -305,7 +331,14 @@ def run_embed(
     os.replace(ids_tmp, ids_path)
 
     # provenance + done marker
-    _atomic_replace_json(prov_path, {"n_docs": n_docs, "source_sha256": src_sha})
+    _atomic_replace_json(
+        prov_path,
+        {
+            "n_docs": n_docs,
+            "source_sha256": src_sha,
+            "max_seq_length": emb_ms,
+        },
+    )
     try:
         os.remove(state_path)
     except FileNotFoundError:

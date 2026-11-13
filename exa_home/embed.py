@@ -125,6 +125,73 @@ class Embedder:
     def encode_queries(self, texts: list[str]) -> np.ndarray:
         return self._encode(texts, batch_size=1)
 
+    def _encode_docs_manual(
+        self,
+        texts: list[str],
+        batch_size: int,
+        sort_by_length: bool,
+    ) -> np.ndarray:
+        """Manual path: tokenize ONCE without padding, sort by token length,
+        then pad each batch to its own longest member.
+
+        The old path tokenized every chunk twice: once in `_token_lengths`
+        for sorting, then again in `_encode` with `padding=True` across the
+        whole 8192-doc chunk. That second pass also padded every document to
+        the chunk maximum (often 512), even when most were short. This path
+        keeps the same vectors (attention masks exclude padding) but removes
+        the duplicate tokenization and the chunk-wide padding.
+        """
+        import torch
+
+        enc = self.model.tokenizer(
+            texts,
+            add_special_tokens=True,
+            truncation=True,
+            max_length=self.max_seq_length,
+            padding=False,
+        )
+        ids = enc["input_ids"]
+        lengths = [len(x) for x in ids]
+        if sort_by_length and len(ids) > 1:
+            order = length_sorted_order(lengths)
+        else:
+            order = np.arange(len(ids))
+
+        pad_id = self.model.tokenizer.pad_token_id
+        if pad_id is None:
+            pad_id = 0
+        has_token_type = "token_type_ids" in enc
+        out_chunks: list[torch.Tensor] = []
+        with torch.no_grad():
+            for start in range(0, len(order), batch_size):
+                idx = order[start : start + batch_size]
+                max_len = max(lengths[i] for i in idx)
+                input_ids = torch.full((len(idx), max_len), pad_id, dtype=torch.long)
+                attention_mask = torch.zeros((len(idx), max_len), dtype=torch.long)
+                for row, i in enumerate(idx):
+                    n = lengths[i]
+                    input_ids[row, :n] = torch.tensor(ids[i], dtype=torch.long)
+                    attention_mask[row, :n] = 1
+                batch = {
+                    "input_ids": input_ids.to(self.device),
+                    "attention_mask": attention_mask.to(self.device),
+                }
+                if has_token_type:
+                    batch["token_type_ids"] = torch.zeros_like(input_ids).to(
+                        self.device
+                    )
+                res = self.model(batch)
+                out_chunks.append(res["sentence_embedding"].detach().cpu())
+
+        arr = torch.cat(out_chunks, dim=0).numpy().astype(np.float32)
+        arr = arr[:, : self.dim]
+        arr = arr / (np.linalg.norm(arr, axis=1, keepdims=True) + 1e-12)
+        if sort_by_length and len(order) > 1:
+            inverse = np.empty_like(order)
+            inverse[order] = np.arange(len(order))
+            arr = arr[inverse]
+        return arr
+
     def encode_docs(
         self,
         texts: list[str],
@@ -134,6 +201,9 @@ class Embedder:
         if not texts:
             return np.zeros((0, self.dim), dtype=np.float32)
         bs = batch_size or self.batch_size
+        if getattr(self, "_manual", False):
+            return self._encode_docs_manual(texts, bs, sort_by_length)
+        # Tier-0/stub path: SentenceTransformer.encode does the tokenization.
         if not sort_by_length or len(texts) < 2:
             return self._encode(texts, batch_size=bs)
         order = length_sorted_order(self._token_lengths(texts))
