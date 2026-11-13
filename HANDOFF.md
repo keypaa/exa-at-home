@@ -4,10 +4,10 @@
 read `ROADMAP.md` and `WORKPLAN.md`. Together they are the complete state
 of the project, what it is, what works, what is open, and what to do next.
 
-Last updated: 2026-11-13. `origin/main` is `0a2072a` (the audit merge,
-pushed). Local `main` is **two commits ahead and not pushed**: `1fa0e60`
-(the docs-consistency pass) and the review-fix batch in this tree. The
-temporary `audit/fix-all-findings` branch was deleted after the merge.
+Last updated: 2026-11-13. `origin/main` is `8fedae8` — the audit merge,
+the docs-consistency pass (`1fa0e60`), and the review-fix batch, all
+pushed. The temporary `audit/fix-all-findings` branch was deleted after
+the merge.
 
 ---
 
@@ -419,15 +419,18 @@ re-run the gate live.
 ## 16. Immediate next step (post-audit, post-merge)
 
 The audit wave (23 commits, 2026-11-12/13; `8e500a4..0a2072a`) is merged
-into `main` and pushed. The docs-consistency pass and the review-fix batch
-are local, unpushed commits on top of it. The roadmap items the audit did
-NOT touch are unchanged and still open, in order:
+into `main` and pushed. The docs-consistency pass (`1fa0e60`) and the
+review-fix batch (`8fedae8`) are pushed as well; `origin/main` is
+`8fedae8`. The roadmap items the audit did NOT touch are unchanged and
+still open, in order:
 
-1. **Re-anchor the golden 50-question set into the 1M haystack** (`eval/E3_PROTOCOL.md`
-   — "the scale story is answering"). This is the number that makes 1M a *scale*
-   claim rather than a rebuild; without it, G2 at 1M is simply unmeasured.
-2. **Commit the 1M ledger rows** (or re-run the 1 M build): `runs.jsonl` has 0
-   one-million rows, so every 1M figure in the docs is currently box-only evidence.
+1. **Commit the 1M ledger rows (or re-run the 1M build)**: `runs.jsonl` has
+   0 one-million rows, so every 1M figure in the docs is currently box-only
+   evidence; a re-run also produces the exact haystack the next item needs.
+2. **Re-anchor the golden 50-question set into that 1M haystack**
+   (`eval/E3_PROTOCOL.md` — "the scale story is answering"). Without it,
+   G2 at 1M is simply unmeasured and 1M is a rebuild rather than a scale
+   claim.
 3. **Then 5M** (K=30k path is in `docs/RUNBOOK.md`), after ingest parallelization
    (WORKPLAN item 5b) lands with a measured docs/s row.
 4. **MCP benchmark at 1M** (WORKPLAN item 9) — the shipped surface has never been
