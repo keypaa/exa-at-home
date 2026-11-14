@@ -305,7 +305,8 @@ def test_stage_index_trains_centroids_inside_the_index_dir(tmp_path, monkeypatch
     assert seen["build_centroids"] == seen["centroids"]
 
 
-def test_stage_fetch_retries_transient_http_errors(tmp_path, monkeypatch):
+@pytest.mark.parametrize("status", [403, 503])
+def test_stage_fetch_retries_transient_http_errors(tmp_path, monkeypatch, status):
     """A 503 on the small wet.paths.gz index must not abort a 2.5 h run."""
     import io
     import urllib.error
@@ -333,7 +334,7 @@ def test_stage_fetch_retries_transient_http_errors(tmp_path, monkeypatch):
         calls["n"] += 1
         if calls["n"] < 3:
             url = getattr(req, "full_url", req)
-            raise urllib.error.HTTPError(url, 503, "busy", {}, io.BytesIO(b""))
+            raise urllib.error.HTTPError(url, status, "busy", {}, io.BytesIO(b""))
         return Resp(payload)
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)

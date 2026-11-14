@@ -157,9 +157,9 @@ def stage_fetch(
     url = WET_PATHS_URL.format(crawl=crawl)
     if verbose:
         print(f"[fetch] {url} -> first {n_wet}", flush=True)
-    # Common Crawl occasionally answers 503/502 on the paths index. The file
-    # is small; retry transient failures instead of aborting a 2.5 h run on
-    # the first blip. 2s, 4s, 8s, 16s backoff (5 attempts total).
+    # Common Crawl/CloudFront occasionally answers 403/503/502 on the paths
+    # index. The file is small; retry transient failures instead of aborting
+    # a 2.5 h run on the first blip. 2s, 4s, 8s, 16s backoff (5 attempts).
     raw = None
     last_error: Exception | None = None
     for attempt in range(1, 6):
@@ -169,7 +169,7 @@ def stage_fetch(
             break
         except urllib.error.HTTPError as e:
             last_error = e
-            if e.code not in (408, 425, 429, 500, 502, 503, 504) or attempt == 5:
+            if e.code not in (403, 408, 425, 429, 500, 502, 503, 504) or attempt == 5:
                 raise
             delay = min(30, 2**attempt)
             print(
